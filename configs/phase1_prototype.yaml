@@ -13,6 +13,8 @@ training:
   lr: 0.001
   weight_decay: 0.0001
   gradient_accumulation_steps: 4 # Effective batch size = 32 * 4 = 128
+  warmup_epochs: 5 # Linear warmup from lr/10 to lr
+  profile_gpu: true # Track GPU memory usage
 
 data:
   train_dir: data/processed/train

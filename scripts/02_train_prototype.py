@@ -1,6 +1,7 @@
 """Main training script for Graph U-Net."""
 
 import argparse
+import json
 from pathlib import Path
 import random
 
@@ -8,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import yaml
+from torch.optim.lr_scheduler import SequentialLR, LinearLR, CosineAnnealingLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -32,6 +34,17 @@ def load_config(config_path: Path) -> dict:
         return yaml.safe_load(f)
 
 
+def get_gpu_memory_stats(device: torch.device) -> dict[str, float]:
+    """Get GPU memory usage statistics."""
+    if device.type == "cuda":
+        return {
+            "allocated_gb": torch.cuda.memory_allocated(device) / 1e9,
+            "reserved_gb": torch.cuda.memory_reserved(device) / 1e9,
+            "max_allocated_gb": torch.cuda.max_memory_allocated(device) / 1e9,
+        }
+    return {"allocated_gb": 0.0, "reserved_gb": 0.0, "max_allocated_gb": 0.0}
+
+
 def train_epoch(
     model: nn.Module,
     train_loader: DataLoader,
@@ -47,9 +60,14 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     total_accuracy = 0.0
+    total_grad_norm = 0.0
     num_batches = 0
 
     optimizer.zero_grad()
+
+    # Reset peak memory stats
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch}")
     for batch_idx, (corrupted, original) in enumerate(pbar):
@@ -67,6 +85,10 @@ def train_epoch(
         loss.backward()
 
         if (batch_idx + 1) % gradient_accumulation_steps == 0:
+            # Compute gradient norm before clipping
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            total_grad_norm += grad_norm.item()
+
             optimizer.step()
             optimizer.zero_grad()
 
@@ -76,9 +98,7 @@ def train_epoch(
         num_batches += 1
 
         # Update progress bar
-        pbar.set_postfix(
-            {"loss": metrics["loss"], "acc": metrics["accuracy"]}
-        )
+        pbar.set_postfix({"loss": metrics["loss"], "acc": metrics["accuracy"]})
 
         # Log to tensorboard
         if batch_idx % log_every == 0:
@@ -86,9 +106,17 @@ def train_epoch(
             writer.add_scalar("train/loss", metrics["loss"], global_step)
             writer.add_scalar("train/accuracy", metrics["accuracy"], global_step)
 
+            # Log GPU memory usage
+            mem_stats = get_gpu_memory_stats(device)
+            writer.add_scalar("gpu/allocated_gb", mem_stats["allocated_gb"], global_step)
+            writer.add_scalar("gpu/max_allocated_gb", mem_stats["max_allocated_gb"], global_step)
+
+    avg_grad_norm = total_grad_norm / (num_batches / gradient_accumulation_steps)
+
     return {
         "loss": total_loss / num_batches,
         "accuracy": total_accuracy / num_batches,
+        "grad_norm": avg_grad_norm,
     }
 
 
@@ -159,9 +187,7 @@ def main() -> None:
     set_seed(config["seed"])
 
     # Device
-    device = torch.device(
-        config["device"] if torch.cuda.is_available() else "cpu"
-    )
+    device = torch.device(config["device"] if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Create datasets
@@ -224,10 +250,31 @@ def main() -> None:
         weight_decay=config["training"]["weight_decay"],
     )
 
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config["training"]["epochs"]
-    )
+    # Learning rate scheduler with warmup
+    warmup_epochs = config["training"].get("warmup_epochs", 5)
+    total_epochs = config["training"]["epochs"]
+
+    if warmup_epochs > 0:
+        # Warmup: linear increase from lr/10 to lr
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.1,
+            end_factor=1.0,
+            total_iters=warmup_epochs,
+        )
+
+        # Main: cosine annealing after warmup
+        main_scheduler = CosineAnnealingLR(optimizer, T_max=total_epochs - warmup_epochs)
+
+        # Combine schedulers
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, main_scheduler],
+            milestones=[warmup_epochs],
+        )
+    else:
+        # No warmup, just cosine annealing
+        scheduler = CosineAnnealingLR(optimizer, T_max=total_epochs)
 
     # Logging
     log_dir = Path(config["logging"]["log_dir"])
@@ -241,9 +288,13 @@ def main() -> None:
     print("\nStarting training...")
     best_val_loss = float("inf")
 
+    # GPU profiling data
+    gpu_profile = [] if config.get("training", {}).get("profile_gpu", True) else None
+
     for epoch in range(1, config["training"]["epochs"] + 1):
         print(f"\n{'=' * 60}")
         print(f"Epoch {epoch}/{config['training']['epochs']}")
+        print(f"Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
         print(f"{'=' * 60}")
 
         # Train
@@ -261,21 +312,39 @@ def main() -> None:
 
         print(
             f"\nTrain - Loss: {train_metrics['loss']:.4f}, "
-            f"Accuracy: {train_metrics['accuracy']:.4f}"
+            f"Accuracy: {train_metrics['accuracy']:.4f}, "
+            f"Grad Norm: {train_metrics['grad_norm']:.4f}"
         )
 
         # Validate
         val_metrics = validate(model, val_loader, criterion, device)
 
-        print(
-            f"Val - Loss: {val_metrics['loss']:.4f}, "
-            f"Accuracy: {val_metrics['accuracy']:.4f}"
-        )
+        print(f"Val - Loss: {val_metrics['loss']:.4f}, Accuracy: {val_metrics['accuracy']:.4f}")
 
         # Log to tensorboard
         writer.add_scalar("val/loss", val_metrics["loss"], epoch)
         writer.add_scalar("val/accuracy", val_metrics["accuracy"], epoch)
+        writer.add_scalar("train/grad_norm", train_metrics["grad_norm"], epoch)
         writer.add_scalar("lr", scheduler.get_last_lr()[0], epoch)
+
+        # Log GPU memory stats
+        mem_stats = get_gpu_memory_stats(device)
+        for key, value in mem_stats.items():
+            writer.add_scalar(f"gpu/{key}", value, epoch)
+
+        print(
+            f"GPU Memory: {mem_stats['allocated_gb']:.2f} GB allocated, "
+            f"{mem_stats['max_allocated_gb']:.2f} GB peak"
+        )
+
+        # Save GPU profile
+        if gpu_profile is not None:
+            gpu_profile.append(
+                {
+                    "epoch": epoch,
+                    **mem_stats,
+                }
+            )
 
         # Step scheduler
         scheduler.step()
@@ -317,6 +386,13 @@ def main() -> None:
     print("Training complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
     print("=" * 60)
+
+    # Save GPU profile
+    if gpu_profile is not None:
+        profile_path = Path(config["logging"]["log_dir"]) / "gpu_profile.json"
+        with open(profile_path, "w") as f:
+            json.dump(gpu_profile, f, indent=2)
+        print(f"\nGPU profile saved to: {profile_path}")
 
     writer.close()
 

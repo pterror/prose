@@ -8,6 +8,7 @@ dependencies = [
     "torch>=2.1.0",
     "torch-geometric>=2.4.0",
     "networkx>=3.0",
+    "matplotlib>=3.8.0",
     "tensorboard>=2.15.0",
     "pyyaml>=6.0",
     "tqdm>=4.66.0",
@@ -39,17 +40,17 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle errors
-    "W",   # pycodestyle warnings
-    "F",   # pyflakes
-    "I",   # isort
-    "N",   # pep8-naming
-    "UP",  # pyupgrade
-    "B",   # flake8-bugbear
-    "C4",  # flake8-comprehensions
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "N",  # pep8-naming
+    "UP", # pyupgrade
+    "B",  # flake8-bugbear
+    "C4", # flake8-comprehensions
 ]
 ignore = [
-    "E501",  # line too long (handled by formatter)
+    "E501", # line too long (handled by formatter)
 ]
 
 [tool.ruff.format]

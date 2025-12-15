@@ -64,6 +64,54 @@ python scripts/02_train_prototype.py \
 tensorboard --logdir runs/
 ```
 
+### 6. Evaluate Model
+
+```bash
+# Evaluate best checkpoint on test set
+python scripts/03_evaluate.py \
+    --checkpoint checkpoints/best_model.pt \
+    --test-dir data/processed/test
+
+# Skip visualization generation (faster)
+python scripts/03_evaluate.py \
+    --checkpoint checkpoints/best_model.pt \
+    --no-viz
+```
+
+## Evaluation Metrics
+
+The evaluation system provides comprehensive metrics for assessing model performance:
+
+### Exact Match Rate
+
+Percentage of graphs that are perfectly reconstructed (all nodes and edges match).
+
+- **Interpretation**: Strict measure of complete correctness
+- **Target**: >10% for initial prototype
+
+### Node Accuracy
+
+Per-node classification accuracy (% of nodes with correct type).
+
+- **Interpretation**: How well the model predicts individual node types
+- **Random baseline**: ~11% (9 node types including MASK)
+- **Target**: >80% for good performance
+
+### Edge F1 Score
+
+Precision and recall for edge prediction across all edge types.
+
+- **Interpretation**: How well the model reconstructs graph structure
+- **Components**: Precision (correct edges / predicted edges), Recall (correct edges / ground truth edges)
+- **Target**: >0.7 for good structural understanding
+
+### Syntax Validity
+
+Percentage of reconstructed graphs that pass Mini-Lisp grammar validation.
+
+- **Interpretation**: Whether predictions are syntactically valid programs
+- **Target**: >90% (model should produce valid structures)
+
 ## Project Structure
 
 ```
@@ -72,14 +120,17 @@ prose/
 ├── data/                  # Dataset storage
 │   ├── processed/         # Generated ASG files (.pt)
 │   └── raw/              # (unused in Phase 1)
+├── results/              # Evaluation outputs
+│   └── visualizations/   # ASG reconstruction comparisons
 ├── scripts/              # Training and data generation scripts
 ├── src/
 │   ├── data/             # ASG builder, synthetic generator
 │   ├── models/           # Graph U-Net architecture
-│   ├── training/         # Loss functions, trainers
+│   ├── training/         # Loss functions, trainers, metrics
+│   ├── utils/            # Visualization utilities
 │   ├── baselines/        # Transformer baseline (TODO)
-│   └── eval/             # Evaluation metrics (TODO)
-└── tests/                # Unit tests (TODO)
+│   └── eval/             # (deprecated, merged into training/)
+└── tests/                # Unit tests
 ```
 
 ## Architecture Details

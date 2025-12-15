@@ -14,13 +14,13 @@
 
 ### Evaluation
 
-- [ ] Implement evaluation metrics:
-  - [ ] Exact match rate (perfect reconstruction)
-  - [ ] Node accuracy (per-node correctness)
-  - [ ] Edge F1 (precision/recall for edge prediction)
-  - [ ] Syntax validity (% parseable as Mini-Lisp)
-- [ ] Create evaluation script (`scripts/03_evaluate.py`)
-- [ ] Visualize reconstructions (corrupted → prediction → ground truth)
+- [x] Implement evaluation metrics:
+  - [x] Exact match rate (perfect reconstruction)
+  - [x] Node accuracy (per-node correctness)
+  - [x] Edge F1 (precision/recall for edge prediction)
+  - [x] Syntax validity (% parseable as Mini-Lisp)
+- [x] Create evaluation script (`scripts/03_evaluate.py`)
+- [x] Visualize reconstructions (corrupted → prediction → ground truth)
 
 ### Baselines
 
