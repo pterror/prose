@@ -13,7 +13,10 @@
       devShell = forAllSystems (
         system:
         let
-          pkgs = nixpkgs.legacyPackages.${system};
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfree = true; # Required for CUDA packages
+          };
         in
         pkgs.mkShell rec {
           packages = with pkgs; [
@@ -24,11 +27,26 @@
             uv
             ruff
             zlib
+
+            # CUDA support for GPU training
+            cudaPackages.cudatoolkit
+            cudaPackages.cudnn
           ];
 
-          LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath packages}:$LD_LIBRARY_PATH";
+          LD_LIBRARY_PATH =
+            pkgs.lib.makeLibraryPath (
+              packages
+              ++ [
+                pkgs.cudaPackages.cudatoolkit
+                pkgs.cudaPackages.cudnn
+              ]
+            )
+            + ":$LD_LIBRARY_PATH";
           shellHook = ''
             export PATH=".venv/bin:$PATH"
+
+            # Add NVIDIA driver paths for GPU detection
+            export LD_LIBRARY_PATH="/run/opengl-driver/lib:$LD_LIBRARY_PATH"
           '';
         }
       );
