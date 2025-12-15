@@ -231,3 +231,114 @@
 2.  **Project B (EBM):** Just try to _fix_ broken graphs.
     - _Success Condition:_ You feed it a tree with a deleted node, and it restores it based on context.
 3.  **Project C (Synergy):** Feed output of A into B.
+
+## Project 2 (alternative)
+
+### 1. Executive Summary
+
+**Objective:** Build a ~100M parameter **Neuro-Symbolic Reasoning Engine** for code synthesis on consumer hardware (RTX 3060).
+**Core Thesis:** True reasoning requires decoupling **Exploration** (Sampling), **Structure** (Refinement), and **Logic** (Verification).
+**Architecture:** A composite "Sandwich" stack:
+
+1.  **GFlowNet (The Architect):** Samples diverse algorithmic skeletons (Drafting).
+2.  **Graph U-Net (The Engineer):** Denoises and structuralizes the draft (Heavy Lifting).
+3.  **EBM (The Critic):** Optimizes for logical/semantic correctness (Verification).
+
+### 2. System Architecture
+
+| Stage         | Model Type           | Input                     | Output                        | Role                                               |
+| :------------ | :------------------- | :------------------------ | :---------------------------- | :------------------------------------------------- |
+| **0. Data**   | _Fuzzer / Generator_ | Grammar Rules             | Synthetic ASGs                | Generate infinite training data.                   |
+| **1. Draft**  | **GFlowNet**         | Prompt / Partial Graph    | Collection of Valid Skeletons | Explore the search space (Recursion vs Iteration). |
+| **2. Refine** | **Graph U-Net**      | Selected Skeleton (Noisy) | Clean Abstract Syntax Graph   | Fix syntax, connect edges, ensure compilation.     |
+| **3. Verify** | **Energy Model**     | Clean ASG                 | Optimized ASG                 | Enforce types, logic, and I/O constraints.         |
+
+### 3. Implementation Roadmap
+
+#### Phase 0: Infrastructure & Data (Crucial for 3060)
+
+_Before training models, we need a high-throughput data pipeline._
+
+- [ ] **Define the "Mini-Language":**
+  - Create a strict subset of Lisp (Scheme) or Rust.
+  - _Constraint:_ Must have a runnable interpreter/compiler in Python for reward calculation.
+- [ ] **Build the Graph Protocol:**
+  - Define `NodeTypes` (Op, Var, Int) and `EdgeTypes` (Child, Next, DataFlow).
+  - Implement `Text -> NetworkX -> PyTorch Geometric` parser.
+- [ ] **The "Infinite" Dataset:**
+  - Write a PCG (Procedural Content Generation) script to spawn valid random programs.
+  - _Task:_ Generate 1M valid graphs, save as `.pt` (binary) files. **Do not parse text at runtime.**
+
+#### Phase 1: The Architect (GFlowNet)
+
+_Goal: Diversity. We want 100 different ways to solve the problem._
+
+- [ ] **Define Action Space:**
+  - `AddNode(Type)`, `AddEdge(Src, Dst)`.
+- [ ] **Implement Reward Function $R(x)$:**
+  - $R(x) = \text{IsValidSyntax}(x) \times \text{DiversityBonus}(x)$.
+- [ ] **Train Forward Policy:**
+  - Backbone: Lightweight Graph Transformer (3 layers).
+  - Loss: **Trajectory Balance (TB)**.
+- [ ] **Eval:** Check if model generates _both_ recursive and iterative solutions for the same prompt.
+
+#### Phase 2: The Engineer (Graph U-Net)
+
+_Goal: Speed & Structure. The "Heavy Lifter."_
+
+- [ ] **Architecture Design:**
+  - Encoder: GCN or GAT layers.
+  - Pool: `TopKPooling` or `SAGPool` (Hierarchical downsampling).
+  - Decoder: Unpooling + Skip Connections.
+- [ ] **The Noise Schedule (Training):**
+  - Input: Take valid graphs from Phase 0 and corrupt them (delete 30% of nodes, break loops).
+  - Target: Original valid graph.
+- [ ] **Training Loop:**
+  - Standard MSE/Cross-Entropy on node features/adjacency.
+  - _Note:_ This will be the fastest model to converge.
+
+#### Phase 3: The Critic (Energy-Based Model)
+
+_Goal: Precision & Logic. System 2 Thinking._
+
+- [ ] **Define Energy Terms:**
+  - $E_{syntax}$: Distance from valid grammar (Hard constraint).
+  - $E_{execution}$: Does `Run(Code, Input)` match `Output`? (Symbolic constraint).
+- [ ] **Training (Contrastive Divergence):**
+  - Positive: Ground truth programs.
+  - Negative: Slightly mutated programs (swapped variable names, off-by-one errors).
+- [ ] **Inference (Langevin Dynamics):**
+  - Implement the loop: $x_{t+1} = x_t - \alpha \nabla_x E(x)$.
+  - _Key:_ Use "Discrete Gradient Estimators" since graphs are discrete.
+
+#### Phase 4: Integration (The "Synergy")
+
+_Goal: End-to-End Pipeline._
+
+- [ ] **The Handshake:**
+  - Pass GFlowNet output (logits) as "Soft Hints" to the U-Net.
+- [ ] **The Filter:**
+  - Implement a "Sanity Check" between Phase 2 and 3. If U-Net output doesn't compile, reject before sending to EBM.
+- [ ] **The Meta-Controller:**
+  - Simple Python script: "Run GFlowNet. If Confidence < Threshold, run U-Net. If Logic Fails, run EBM loop."
+
+### 4. Key Libraries & Tools
+
+- **Graph Backend:** `pytorch_geometric` (PyG) - _Standard for GNNs._
+- **Logic/Types:** `z3-solver` (Python bindings) - _For Phase 3 constraints._
+- **GFlowNet:** `torchgfn` (Optional, or write custom TB loss) - _For Phase 1._
+- **Data Gen:** `hypothesis` (Python) - _Great for generating random structured test cases._
+
+### 5. Potential Pitfalls (Pre-Mortem)
+
+1.  **The "Vocabulary" Mismatch:** GFlowNet generates "Actions", U-Net generates "Features".
+    - _Fix:_ Ensure they share the exact same `Node/Edge` embedding dictionary.
+2.  **Mode Collapse in EBM:** EBM might learn to just output an empty program (Low energy).
+    - _Fix:_ Add a "Length Penalty" or "Goal Constraint" to the Energy function.
+3.  **3060 VRAM:** Keeping 3 models in memory.
+    - _Fix:_ Pipeline execution. Load GFlowNet $\to$ Gen $\to$ Offload. Load U-Net $\to$ Refine $\to$ Offload.
+
+### Suggested "First File" for your Agent
+
+Create `src/common/graph_spec.py`.
+Define the `NodeTypes`, `EdgeTypes`, and the `to_networkx` / `from_networkx` functions. If this standard varies between models, the whole project fails. **Standardize the data structure first.**
