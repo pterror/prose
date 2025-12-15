@@ -10,9 +10,25 @@
 
 - [x] Generate initial training dataset (2K samples, balanced across templates)
 - [x] Generate test set (500 val + 500 test samples)
-- [ ] Run full 50-epoch training on RTX 3060
-- [ ] Profile GPU memory usage and optimize batch size
-- [ ] Add learning rate warmup + cosine schedule tuning
+- [x] Run full 50-epoch training on RTX 3060
+- [x] Profile GPU memory usage and optimize batch size
+- [x] Add learning rate warmup + cosine schedule tuning
+
+**🔍 Key Findings from Training Run:**
+
+- ✅ Training completed: 50 epochs, best val accuracy 86.39%
+- ⚠️ **Systematic error**: Model confuses OPERATOR ↔ SYMBOL (dominant error pattern)
+- ⚠️ **Positional overfitting**: Positions 3 & 7 consistently mispredicted as SYMBOL
+- ⚠️ **Root cause**: Limited template diversity (~400-500 unique templates × 4-6 duplication)
+- ⚠️ **GPU issue**: Training ran on CPU (PyTorch has CUDA but CUDA unavailable)
+- 📊 **Performance**: Model correctly reconstructs ~30% of masked nodes, preserves ~99% of uncorrupted nodes
+
+**🎯 Priority Actions:**
+
+- [ ] **Fix CUDA setup** - Verify GPU drivers and PyTorch CUDA availability
+- [ ] **Expand templates** - Add more diverse Mini-Lisp programs to reduce positional bias
+- [ ] **Add position encodings** - Help model distinguish positional vs semantic patterns
+- [ ] **Increase model depth** - Try 5-7 layers instead of 3 for better context propagation
 
 #### Evaluation
 
@@ -35,9 +51,12 @@
 #### Model Improvements
 
 - [ ] Implement proper unpooling (restore full graph topology)
-- [ ] Add position encodings (depth in tree, sibling index)
+- [/] **Add position encodings (depth in tree, sibling index)** 👈 High priority to fix positional overfitting
+- [ ] **Increase model depth** from 3 to 5-7 layers for better context propagation
+- [ ] **Add focal loss** for OPERATOR vs SYMBOL to address confusion
 - [ ] Experiment with edge-aware attention (different weights for Child/Sibling/DataFlow)
 - [ ] Try GCN vs GAT comparison
+- [ ] **Data augmentation**: Vary which positions get masked to reduce positional bias
 
 #### Code Quality
 

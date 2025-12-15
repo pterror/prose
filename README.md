@@ -11,6 +11,21 @@ This project implements a specialized neural model for program synthesis and ref
 - **Target**: Local hardware (NVIDIA RTX 3060)
 - **Approach**: Neuro-symbolic with constrained decoding
 
+## Phase 1 Results (December 2025)
+
+**Training Completed**: 50 epochs on 2K training samples
+
+- **Best Validation Accuracy**: 86.39%
+- **Model Size**: 0.63M parameters
+- **Key Finding**: Systematic OPERATOR ↔ SYMBOL confusion due to positional overfitting
+- **Root Cause**: Limited template diversity (~400-500 unique templates × 4-6 duplication)
+
+**Next Steps**: Expand templates, add position encodings, increase model depth to 5-7 layers.
+
+See [`docs/phase1_results.md`](docs/phase1_results.md) for detailed analysis.
+
+---
+
 ## Quick Start
 
 ### 1. Setup Environment
