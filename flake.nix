@@ -27,7 +27,9 @@
           ];
 
           LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath packages}:$LD_LIBRARY_PATH";
-          PATH = ".venv/bin:$PATH";
+          shellHook = ''
+            export PATH=".venv/bin:$PATH"
+          '';
         }
       );
     };
