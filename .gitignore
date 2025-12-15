@@ -44,6 +44,7 @@ cache/
 
 # generated data
 data/processed/
+data/processed_old_backup/
 
 # compile cache
 __pycache__/

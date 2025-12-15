@@ -4,8 +4,10 @@
 
 ### Dataset & Training
 
-- [ ] Generate full training dataset (100K-1M samples, balanced across templates)
-- [ ] Generate test set (10K-20K samples)
+> **Note**: Using hybrid approach - started with 2K/500/500 split (4-6× duplication) based on template diversity analysis. Will expand templates before scaling dataset.
+
+- [x] Generate initial training dataset (2K samples, balanced across templates)
+- [x] Generate test set (500 val + 500 test samples)
 - [ ] Run full 50-epoch training on RTX 3060
 - [ ] Profile GPU memory usage and optimize batch size
 - [ ] Add learning rate warmup + cosine schedule tuning
