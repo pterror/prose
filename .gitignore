@@ -49,6 +49,12 @@ data/
 # compile cache
 __pycache__/
 
+# test coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
 # output
 runs/
 checkpoints/
