@@ -231,3 +231,223 @@ class GraphUNet(nn.Module):
         node_logits = self.node_output(x)
 
         return node_logits
+
+
+class IterativeGraphUNet(nn.Module):
+    """
+    Iterative Graph U-Net for Phase 1.5 test-driven refinement.
+
+    Processes 6-feature nodes: [token_id, prev_token_id, depth, sibling_index, iteration, test_signal]
+    Outputs token predictions and confidence scores for iterative refinement.
+    """
+
+    def __init__(
+        self,
+        vocab_size: int,
+        hidden_channels: int = 256,
+        depth: int = 3,
+        max_iterations: int = 5,
+        pool_ratio: float = 0.5,
+        layer_type: str = "GAT",
+    ) -> None:
+        """
+        Initialize Iterative Graph U-Net.
+
+        Args:
+            vocab_size: Size of token vocabulary
+            hidden_channels: Hidden layer dimension
+            depth: Number of pooling/unpooling layers
+            max_iterations: Maximum refinement iterations
+            pool_ratio: Ratio of nodes to keep in pooling
+            layer_type: "GAT" or "GCN"
+        """
+        super().__init__()
+
+        self.vocab_size = vocab_size
+        self.hidden_channels = hidden_channels
+        self.depth = depth
+        self.max_iterations = max_iterations
+
+        # Feature embeddings
+        self.token_embedding = nn.Embedding(vocab_size, 128)
+        self.prev_token_embedding = nn.Embedding(vocab_size, 32)
+        self.iteration_embedding = nn.Embedding(max_iterations, 32)
+
+        # Position and test signal projections
+        self.position_projection = nn.Linear(2, 32)  # depth, sibling_index
+        self.test_signal_projection = nn.Linear(1, 32)
+
+        # Total input dimension: 128 + 32 + 32 + 32 + 32 = 256
+        self.input_dim = 128 + 32 + 32 + 32 + 32
+
+        # Input projection to match hidden_channels if different
+        if self.input_dim != hidden_channels:
+            self.input_projection = nn.Linear(self.input_dim, hidden_channels)
+        else:
+            self.input_projection = nn.Identity()
+
+        # Encoder layers
+        self.encoder_layers = nn.ModuleList()
+        self.pool_layers = nn.ModuleList()
+
+        for i in range(depth):
+            if layer_type == "GAT":
+                self.encoder_layers.append(
+                    GATConv(hidden_channels, hidden_channels, heads=1, concat=False)
+                )
+            else:
+                self.encoder_layers.append(GCNConv(hidden_channels, hidden_channels))
+
+            self.pool_layers.append(TopKPooling(hidden_channels, ratio=pool_ratio))
+
+        # Bottleneck
+        self.bottleneck = nn.ModuleList([
+            GATConv(hidden_channels, hidden_channels, heads=1, concat=False)
+            if layer_type == "GAT"
+            else GCNConv(hidden_channels, hidden_channels)
+            for _ in range(2)
+        ])
+
+        # Decoder layers
+        self.decoder_layers = nn.ModuleList()
+        for i in range(depth):
+            skip_channels = hidden_channels * 2 if i > 0 else hidden_channels
+            if layer_type == "GAT":
+                self.decoder_layers.append(
+                    GATConv(skip_channels, hidden_channels, heads=1, concat=False)
+                )
+            else:
+                self.decoder_layers.append(GCNConv(skip_channels, hidden_channels))
+
+        # Output heads
+        self.token_predictor = nn.Linear(hidden_channels, vocab_size)
+        self.confidence_head = nn.Linear(hidden_channels, 1)
+
+    def forward(self, data: Data, iteration: int = 0) -> dict[str, torch.Tensor]:
+        """
+        Forward pass for iterative refinement.
+
+        Args:
+            data: PyG Data with x [num_nodes, 6] features:
+                  [token_id, prev_token_id, depth, sibling_index, iteration, test_signal]
+            iteration: Current iteration number (can override data.x[:, 4])
+
+        Returns:
+            Dict with:
+                - 'logits': Token prediction logits [num_nodes, vocab_size]
+                - 'confidence': Confidence scores [num_nodes, 1]
+        """
+        # Extract features from data
+        # Handle both float and long tensors
+        x_data = data.x
+
+        token_ids = x_data[:, 0].long()  # Current token
+        prev_token_ids = x_data[:, 1].long()  # Previous iteration token
+        position_features = x_data[:, 2:4].float()  # depth, sibling_index
+        iter_feature = x_data[:, 4].long() if iteration == 0 else torch.full((x_data.size(0),), iteration, dtype=torch.long, device=x_data.device)
+        test_signals = x_data[:, 5:6].float()  # test_signal
+
+        # Embed all features
+        token_emb = self.token_embedding(token_ids)  # [num_nodes, 128]
+        prev_emb = self.prev_token_embedding(prev_token_ids)  # [num_nodes, 32]
+        pos_emb = self.position_projection(position_features)  # [num_nodes, 32]
+        iter_emb = self.iteration_embedding(iter_feature)  # [num_nodes, 32]
+        test_emb = self.test_signal_projection(test_signals)  # [num_nodes, 32]
+
+        # Concatenate all features
+        h = torch.cat([token_emb, prev_emb, pos_emb, iter_emb, test_emb], dim=-1)
+
+        # Project to hidden dimension
+        h = self.input_projection(h)
+        h = F.gelu(h)
+
+        edge_index = data.edge_index
+        batch = data.batch if hasattr(data, 'batch') else None
+
+        # Store skip connections
+        skip_connections = []
+        pool_indices = []
+
+        # Encoder with pooling
+        for i in range(self.depth):
+            h = self.encoder_layers[i](h, edge_index)
+            h = F.gelu(h)
+
+            skip_connections.append(h)
+
+            # Pool
+            h, edge_index, _, batch, perm, _ = self.pool_layers[i](
+                h, edge_index, edge_attr=None, batch=batch
+            )
+            pool_indices.append(perm)
+
+        # Bottleneck
+        for layer in self.bottleneck:
+            h = layer(h, edge_index)
+            h = F.gelu(h)
+
+        # For Phase 1.5, use simplified decoder without unpooling
+        # Just process at pooled level and output
+
+        # Output predictions
+        logits = self.token_predictor(h)
+        confidence = torch.sigmoid(self.confidence_head(h))
+
+        return {
+            'logits': logits,
+            'confidence': confidence
+        }
+
+    def forward_full(self, data: Data, iteration: int = 0) -> dict[str, torch.Tensor]:
+        """
+        Forward pass at full resolution (no pooling) for training.
+
+        Args:
+            data: PyG Data with x [num_nodes, 6]
+            iteration: Current iteration number
+
+        Returns:
+            Dict with logits and confidence for all nodes
+        """
+        # Extract and embed features (same as forward)
+        x_data = data.x
+
+        token_ids = x_data[:, 0].long()
+        prev_token_ids = x_data[:, 1].long()
+        position_features = x_data[:, 2:4].float()
+        iter_feature = x_data[:, 4].long() if iteration == 0 else torch.full((x_data.size(0),), iteration, dtype=torch.long, device=x_data.device)
+        test_signals = x_data[:, 5:6].float()
+
+        token_emb = self.token_embedding(token_ids)
+        prev_emb = self.prev_token_embedding(prev_token_ids)
+        pos_emb = self.position_projection(position_features)
+        iter_emb = self.iteration_embedding(iter_feature)
+        test_emb = self.test_signal_projection(test_signals)
+
+        h = torch.cat([token_emb, prev_emb, pos_emb, iter_emb, test_emb], dim=-1)
+        h = self.input_projection(h)
+        h = F.gelu(h)
+
+        edge_index = data.edge_index
+
+        # Single-level processing (no pooling for full resolution)
+        for layer in self.encoder_layers[:1]:
+            h = layer(h, edge_index)
+            h = F.gelu(h)
+
+        for layer in self.bottleneck:
+            h = layer(h, edge_index)
+            h = F.gelu(h)
+
+        for layer in self.decoder_layers[:1]:
+            h = layer(h, edge_index)
+            h = F.gelu(h)
+
+        # Output
+        logits = self.token_predictor(h)
+        confidence = torch.sigmoid(self.confidence_head(h))
+
+        return {
+            'logits': logits,
+            'confidence': confidence
+        }
