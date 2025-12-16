@@ -1,0 +1,279 @@
+"""Trajectory generation for iterative refinement training."""
+
+from dataclasses import dataclass
+from typing import List, Optional
+
+import torch
+import torch.nn as nn
+from torch_geometric.data import Data
+
+from src.data.asg_builder import ASGBuilder
+from src.data.dataset import TestCase
+from src.runtime.interpreter import MiniLispInterpreter
+
+
+@dataclass
+class TrajectoryStep:
+    """Single step in a refinement trajectory."""
+    input_graph: Data  # Current state (corrupted)
+    prev_graph: Data  # Previous iteration state
+    target_graph: Data  # Ground truth (clean program)
+    test_signals: torch.Tensor  # Test failure signals [num_nodes]
+    iteration: int  # Current iteration (0-indexed)
+    tests_passing: bool  # Whether all tests pass
+
+
+class TrajectoryGenerator:
+    """Generates training trajectories for iterative refinement."""
+
+    def __init__(
+        self,
+        builder: ASGBuilder,
+        interpreter: MiniLispInterpreter,
+        mask_token_id: int = 0,
+    ):
+        """
+        Initialize trajectory generator.
+
+        Args:
+            builder: ASGBuilder with vocabulary for creating graphs
+            interpreter: MiniLispInterpreter for test execution
+            mask_token_id: Token ID for masking (typically vocabulary.mask_token_id)
+        """
+        self.builder = builder
+        self.interpreter = interpreter
+        self.mask_token_id = mask_token_id
+
+    def generate_trajectory(
+        self,
+        clean_graph: Data,
+        tests: List[TestCase],
+        corruption_rate: float = 0.5,
+        max_iterations: int = 5,
+        model: Optional[nn.Module] = None,
+        epsilon: float = 0.3,
+    ) -> List[TrajectoryStep]:
+        """
+        Generate a training trajectory by simulating iterative refinement.
+
+        Args:
+            clean_graph: Ground truth graph
+            tests: Test cases for the program
+            corruption_rate: Fraction of nodes to corrupt initially
+            max_iterations: Maximum refinement iterations
+            model: Optional model for predictions (if None, uses random policy)
+            epsilon: Epsilon-greedy exploration rate (if model provided)
+
+        Returns:
+            List of trajectory steps (one per iteration)
+        """
+        trajectory = []
+
+        # 1. Initial corruption
+        current_graph = self._corrupt_graph(clean_graph, corruption_rate)
+        prev_graph = current_graph.clone()
+
+        # 2. Simulate refinement iterations
+        for iteration in range(max_iterations):
+            # Compute test signals (all zeros for now - would need AST reconstruction)
+            # In full implementation, would execute tests and trace failures
+            test_signals = torch.zeros(current_graph.x.size(0))
+
+            # Store trajectory step
+            trajectory.append(TrajectoryStep(
+                input_graph=current_graph.clone(),
+                prev_graph=prev_graph.clone(),
+                target_graph=clean_graph,
+                test_signals=test_signals,
+                iteration=iteration,
+                tests_passing=False,  # Simplified for now
+            ))
+
+            # Generate next state (either via model or random)
+            if model is not None and torch.rand(1).item() > epsilon:
+                # Use model prediction
+                with torch.no_grad():
+                    # Update iteration and test signals in features
+                    current_graph.x[:, 4] = iteration
+                    current_graph.x[:, 5] = test_signals
+
+                    output = model.forward_full(current_graph, iteration=iteration)
+                    predictions = output['logits'].argmax(dim=-1)
+
+                    # Update token IDs
+                    prev_graph = current_graph.clone()
+                    current_graph.x[:, 1] = current_graph.x[:, 0]  # prev_token_id
+                    current_graph.x[:, 0] = predictions.float()  # new token_id
+            else:
+                # Random policy (for early training)
+                prev_graph = current_graph.clone()
+                num_nodes = current_graph.x.size(0)
+
+                # Randomly update some tokens
+                if self.builder.vocabulary:
+                    vocab_size = self.builder.vocabulary.vocab_size
+                    random_tokens = torch.randint(0, vocab_size, (num_nodes,))
+
+                    # Update with some probability
+                    update_mask = torch.rand(num_nodes) < 0.3
+                    current_graph.x[update_mask, 1] = current_graph.x[update_mask, 0]
+                    current_graph.x[update_mask, 0] = random_tokens[update_mask].float()
+
+            # Check if we've converged (simplified)
+            if torch.allclose(current_graph.x[:, 0], clean_graph.x[:, 0]):
+                # Mark final step as passing
+                trajectory[-1] = TrajectoryStep(
+                    input_graph=trajectory[-1].input_graph,
+                    prev_graph=trajectory[-1].prev_graph,
+                    target_graph=clean_graph,
+                    test_signals=test_signals,
+                    iteration=iteration,
+                    tests_passing=True,
+                )
+                break
+
+        return trajectory
+
+    def _corrupt_graph(
+        self,
+        graph: Data,
+        corruption_rate: float,
+        keep_structure: bool = True
+    ) -> Data:
+        """
+        Corrupt a graph by masking tokens.
+
+        Args:
+            graph: Original graph
+            corruption_rate: Fraction of nodes to corrupt
+            keep_structure: If True and rate < 0.9, preserve structural keywords
+
+        Returns:
+            Corrupted graph
+        """
+        corrupted = Data(
+            x=graph.x.clone(),
+            edge_index=graph.edge_index.clone(),
+            edge_attr=graph.edge_attr.clone() if hasattr(graph, 'edge_attr') else None,
+        )
+
+        # Copy node_type if present
+        if hasattr(graph, 'node_type'):
+            corrupted.node_type = graph.node_type.clone()
+
+        num_nodes = corrupted.x.size(0)
+
+        if corruption_rate >= 0.9:
+            # Full generation mode: corrupt all nodes
+            corrupt_indices = list(range(num_nodes))
+        else:
+            # Partial corruption
+            num_corrupt = max(1, int(num_nodes * corruption_rate))
+
+            if keep_structure and hasattr(corrupted, 'node_type'):
+                # Structural types: DEFINE=3, LAMBDA=4, IF=5, LET=6
+                structural_types = {3, 4, 5, 6}
+                non_structural = [
+                    i for i in range(num_nodes)
+                    if corrupted.node_type[i].item() not in structural_types
+                ]
+                if len(non_structural) >= num_corrupt:
+                    import random
+                    corrupt_indices = random.sample(non_structural, num_corrupt)
+                else:
+                    import random
+                    corrupt_indices = random.sample(range(num_nodes), num_corrupt)
+            else:
+                import random
+                corrupt_indices = random.sample(range(num_nodes), num_corrupt)
+
+        # Mask selected nodes
+        for idx in corrupt_indices:
+            corrupted.x[idx, 0] = self.mask_token_id  # token_id
+            corrupted.x[idx, 1] = self.mask_token_id  # prev_token_id
+
+        return corrupted
+
+
+def corrupt_program_curriculum(
+    program: Data,
+    epoch: int,
+    total_epochs: int = 50,
+    mask_token_id: int = 0,
+) -> Data:
+    """
+    Corrupt program with curriculum learning schedule.
+
+    Corruption rate increases from 20% to 100% over training.
+
+    Args:
+        program: Clean program graph
+        epoch: Current epoch (0-indexed)
+        total_epochs: Total training epochs
+        mask_token_id: Token ID for masking
+
+    Returns:
+        Corrupted program graph
+    """
+    # Curriculum stages (from phase1.5.md)
+    # Stage 1 (0-5): 20%
+    # Stage 2 (6-15): 50%
+    # Stage 3 (16-25): 75%
+    # Stage 4 (26-40): 90%
+    # Stage 5 (41-50): 100%
+
+    if epoch < 6:
+        corruption_rate = 0.2
+        keep_structure = True
+    elif epoch < 16:
+        corruption_rate = 0.5
+        keep_structure = True
+    elif epoch < 26:
+        corruption_rate = 0.75
+        keep_structure = True
+    elif epoch < 41:
+        corruption_rate = 0.9
+        keep_structure = False
+    else:
+        corruption_rate = 1.0
+        keep_structure = False
+
+    # Create corrupted version
+    corrupted = Data(
+        x=program.x.clone(),
+        edge_index=program.edge_index.clone(),
+        edge_attr=program.edge_attr.clone() if hasattr(program, 'edge_attr') and program.edge_attr is not None else None,
+    )
+
+    if hasattr(program, 'node_type'):
+        corrupted.node_type = program.node_type.clone()
+
+    num_nodes = corrupted.x.size(0)
+
+    if corruption_rate >= 0.9:
+        corrupt_indices = list(range(num_nodes))
+    else:
+        num_corrupt = max(1, int(num_nodes * corruption_rate))
+
+        if keep_structure and hasattr(corrupted, 'node_type'):
+            structural_types = {3, 4, 5, 6}
+            non_structural = [
+                i for i in range(num_nodes)
+                if corrupted.node_type[i].item() not in structural_types
+            ]
+            if len(non_structural) >= num_corrupt:
+                import random
+                corrupt_indices = random.sample(non_structural, num_corrupt)
+            else:
+                import random
+                corrupt_indices = random.sample(range(num_nodes), num_corrupt)
+        else:
+            import random
+            corrupt_indices = random.sample(range(num_nodes), num_corrupt)
+
+    # Mask tokens
+    for idx in corrupt_indices:
+        corrupted.x[idx, 0] = mask_token_id
+        corrupted.x[idx, 1] = mask_token_id
+
+    return corrupted
