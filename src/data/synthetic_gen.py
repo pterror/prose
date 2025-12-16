@@ -35,47 +35,155 @@ class ProgramTemplate:
 
 
 class ArithmeticTemplate(ProgramTemplate):
-    """Template for arithmetic expressions: (+ (* a b) (- c d))"""
+    """Template for arithmetic expressions with varying structure.
+
+    Variations:
+    - 2-ary: (op a b)
+    - 3-ary: (op a b c)
+    - Nested left: (op1 (op2 a b) c)
+    - Nested right: (op1 a (op2 b c))
+    - Deep nested: (op1 (op2 (op3 a b) c) d)
+    """
 
     def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
         ops = ["+", "-", "*", "/"]
-        op1 = rng.choice(ops)
-        op2 = rng.choice(ops)
-        op3 = rng.choice(ops)
 
-        # (op1 (op2 a b) (op3 c d))
-        root = ASTNode(
-            NodeType.LIST,
-            children=[
-                ASTNode(NodeType.OPERATOR, value=op1),
-                ASTNode(
-                    NodeType.LIST,
-                    children=[
-                        ASTNode(NodeType.OPERATOR, value=op2),
-                        ASTNode(NodeType.SYMBOL, value="a"),
-                        ASTNode(NodeType.SYMBOL, value="b"),
-                    ],
-                ),
-                ASTNode(
-                    NodeType.LIST,
-                    children=[
-                        ASTNode(NodeType.OPERATOR, value=op3),
-                        ASTNode(NodeType.SYMBOL, value="c"),
-                        ASTNode(NodeType.SYMBOL, value="d"),
-                    ],
-                ),
-            ],
-        )
+        # Choose structure variation
+        structure = rng.choice(["2-ary", "3-ary", "nested_left", "nested_right", "deep_nested"])
 
-        return root, ProgramMetadata(
-            template_id=self.template_id,
-            depth=2,
-            num_nodes=11,
-            num_operators=3,
-            has_recursion=False,
-            has_variables=True,
-            operator_types=[op1, op2, op3],
-        )
+        if structure == "2-ary":
+            # Simple: (op a b)
+            op = rng.choice(ops)
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op),
+                    ASTNode(NodeType.SYMBOL, value="a"),
+                    ASTNode(NodeType.SYMBOL, value="b"),
+                ],
+            )
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=1,
+                num_nodes=4,
+                num_operators=1,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op],
+            )
+
+        elif structure == "3-ary":
+            # Three operands: (op a b c)
+            op = rng.choice(ops)
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op),
+                    ASTNode(NodeType.SYMBOL, value="a"),
+                    ASTNode(NodeType.SYMBOL, value="b"),
+                    ASTNode(NodeType.SYMBOL, value="c"),
+                ],
+            )
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=1,
+                num_nodes=5,
+                num_operators=1,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op],
+            )
+
+        elif structure == "nested_left":
+            # Left-nested: (op1 (op2 a b) c)
+            op1, op2 = rng.choice(ops), rng.choice(ops)
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(NodeType.SYMBOL, value="a"),
+                            ASTNode(NodeType.SYMBOL, value="b"),
+                        ],
+                    ),
+                    ASTNode(NodeType.SYMBOL, value="c"),
+                ],
+            )
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=2,
+                num_nodes=7,
+                num_operators=2,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2],
+            )
+
+        elif structure == "nested_right":
+            # Right-nested: (op1 a (op2 b c))
+            op1, op2 = rng.choice(ops), rng.choice(ops)
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(NodeType.SYMBOL, value="a"),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(NodeType.SYMBOL, value="b"),
+                            ASTNode(NodeType.SYMBOL, value="c"),
+                        ],
+                    ),
+                ],
+            )
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=2,
+                num_nodes=7,
+                num_operators=2,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2],
+            )
+
+        else:  # deep_nested
+            # Deep nested: (op1 (op2 (op3 a b) c) d)
+            op1, op2, op3 = rng.choice(ops), rng.choice(ops), rng.choice(ops)
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.OPERATOR, value=op3),
+                                    ASTNode(NodeType.SYMBOL, value="a"),
+                                    ASTNode(NodeType.SYMBOL, value="b"),
+                                ],
+                            ),
+                            ASTNode(NodeType.SYMBOL, value="c"),
+                        ],
+                    ),
+                    ASTNode(NodeType.SYMBOL, value="d"),
+                ],
+            )
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=3,
+                num_nodes=10,
+                num_operators=3,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2, op3],
+            )
 
 
 class RecursionTemplate(ProgramTemplate):
@@ -194,57 +302,479 @@ class LambdaTemplate(ProgramTemplate):
 
 
 class LetBindingTemplate(ProgramTemplate):
-    """Template for variable scoping: (let ((x 1) (y 2)) (+ x y))"""
+    """Template for variable scoping with varying binding counts and dependencies.
+
+    Variations:
+    - 1 binding: (let ((x 1)) x)
+    - 2 bindings: (let ((x 1) (y 2)) (+ x y))
+    - 3 bindings: (let ((x 1) (y 2) (z 3)) (+ x (+ y z)))
+    - Dependent bindings: (let ((x 1) (y (+ x 2))) (* x y))
+    """
 
     def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
-        var1, var2 = "x", "y"
-        val1 = rng.randint(1, 10)
-        val2 = rng.randint(1, 10)
-        op = rng.choice(["+", "-", "*"])
+        # Vary number of bindings (1-3)
+        num_bindings = rng.choice([1, 2, 3])
+        var_names = ["x", "y", "z"]
+        ops = ["+", "-", "*"]
 
-        # (let ((var1 val1) (var2 val2)) (op var1 var2))
+        values = [rng.randint(1, 10) for _ in range(num_bindings)]
+
+        # Vary whether bindings are dependent (y depends on x)
+        dependent = rng.choice([True, False]) and num_bindings >= 2
+
+        # Build bindings
+        bindings = []
+        for i in range(num_bindings):
+            var_name = var_names[i]
+
+            if dependent and i > 0:
+                # Dependent binding: y = (+ x val)
+                val_expr = ASTNode(
+                    NodeType.LIST,
+                    children=[
+                        ASTNode(NodeType.OPERATOR, value=rng.choice(ops)),
+                        ASTNode(NodeType.SYMBOL, value=var_names[i - 1]),
+                        ASTNode(NodeType.NUMBER, value=values[i]),
+                    ],
+                )
+            else:
+                # Simple binding: x = val
+                val_expr = ASTNode(NodeType.NUMBER, value=values[i])
+
+            bindings.append(
+                ASTNode(
+                    NodeType.LIST,
+                    children=[
+                        ASTNode(NodeType.SYMBOL, value=var_name),
+                        val_expr,
+                    ],
+                )
+            )
+
+        # Build body (use all variables)
+        if num_bindings == 1:
+            # Simple: x
+            body = ASTNode(NodeType.SYMBOL, value=var_names[0])
+        elif num_bindings == 2:
+            # Binary operation: (op x y)
+            op = rng.choice(ops)
+            body = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op),
+                    ASTNode(NodeType.SYMBOL, value=var_names[0]),
+                    ASTNode(NodeType.SYMBOL, value=var_names[1]),
+                ],
+            )
+        else:  # num_bindings == 3
+            # Nested: (+ x (+ y z))
+            op1, op2 = rng.choice(ops), rng.choice(ops)
+            body = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(NodeType.SYMBOL, value=var_names[0]),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(NodeType.SYMBOL, value=var_names[1]),
+                            ASTNode(NodeType.SYMBOL, value=var_names[2]),
+                        ],
+                    ),
+                ],
+            )
+
+        # Build LET node
         root = ASTNode(
             NodeType.LET,
             children=[
-                ASTNode(
-                    NodeType.LIST,
-                    children=[
-                        ASTNode(
-                            NodeType.LIST,
-                            children=[
-                                ASTNode(NodeType.SYMBOL, value=var1),
-                                ASTNode(NodeType.NUMBER, value=val1),
-                            ],
-                        ),
-                        ASTNode(
-                            NodeType.LIST,
-                            children=[
-                                ASTNode(NodeType.SYMBOL, value=var2),
-                                ASTNode(NodeType.NUMBER, value=val2),
-                            ],
-                        ),
-                    ],
-                ),
-                ASTNode(
-                    NodeType.LIST,
-                    children=[
-                        ASTNode(NodeType.OPERATOR, value=op),
-                        ASTNode(NodeType.SYMBOL, value=var1),
-                        ASTNode(NodeType.SYMBOL, value=var2),
-                    ],
-                ),
+                ASTNode(NodeType.LIST, children=bindings),
+                body,
             ],
         )
 
+        # Calculate metadata
+        num_ops = (
+            sum(
+                1
+                for binding in bindings
+                if dependent and binding.children[1].node_type == NodeType.LIST
+            )
+            if dependent
+            else 0
+        ) + (0 if num_bindings == 1 else (1 if num_bindings == 2 else 2))
+
+        # Calculate num_nodes more precisely
+        # LET node itself: 1
+        # Bindings list: 1
+        # Each binding: 1 (list) + 1 (symbol) + (1 (number) or 4 (list, op, symbol, number))
+        # Body: 1 (symbol) or 4 (list, op, symbol, symbol) or 7 (list, op, symbol, list, op, symbol, symbol)
+
+        nodes_in_bindings = 0
+        for i in range(num_bindings):
+            nodes_in_bindings += 1  # for the inner LIST node
+            nodes_in_bindings += 1  # for the SYMBOL (var_name)
+            if dependent and i > 0:
+                nodes_in_bindings += 4  # for (LIST, OPERATOR, SYMBOL, NUMBER)
+            else:
+                nodes_in_bindings += 1  # for NUMBER
+
+        nodes_in_body = 0
+        if num_bindings == 1:
+            nodes_in_body = 1  # SYMBOL
+        elif num_bindings == 2:
+            nodes_in_body = 4  # LIST, OPERATOR, SYMBOL, SYMBOL
+        else:  # num_bindings == 3
+            nodes_in_body = 7  # LIST, OPERATOR, SYMBOL, LIST, OPERATOR, SYMBOL, SYMBOL
+
+        num_nodes = 1 + 1 + nodes_in_bindings + nodes_in_body  # LET, bindings_list, bindings, body
+
+        # Collect operator types
+        operator_types = []
+        if dependent:
+            for i in range(num_bindings):
+                if i > 0:
+                    # The operator is in the value expression of the dependent binding
+                    operator_types.append(bindings[i].children[1].children[0].value)
+
+        if num_bindings == 2:
+            operator_types.append(body.children[0].value)
+        elif num_bindings == 3:
+            operator_types.append(body.children[0].value)
+            operator_types.append(body.children[2].children[0].value)
+
         return root, ProgramMetadata(
             template_id=self.template_id,
-            depth=3,
-            num_nodes=13,
-            num_operators=1,
+            depth=3
+            if num_bindings <= 2 and not dependent
+            else 4
+            if num_bindings == 3 and not dependent
+            else 4
+            if num_bindings == 2 and dependent
+            else 5,  # Simplified depth calculation
+            num_nodes=num_nodes,
+            num_operators=num_ops,
             has_recursion=False,
             has_variables=True,
-            operator_types=[op],
+            operator_types=operator_types,
         )
+
+
+class NestedLetTemplate(ProgramTemplate):
+    """Template for nested let bindings.
+
+    Example: (let ((x 1)) (let ((y (+ x 2))) (+ x y)))
+    """
+
+    def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
+        # Vary nesting depth (1-2 levels)
+        nesting_depth = rng.choice([1, 2])
+        ops = ["+", "-", "*"]
+
+        if nesting_depth == 1:
+            # Single level: (let ((x 1)) (let ((y 2)) (+ x y)))
+            val1 = rng.randint(1, 10)
+            val2 = rng.randint(1, 10)
+            op = rng.choice(ops)
+
+            inner_let = ASTNode(
+                NodeType.LET,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.SYMBOL, value="y"),
+                                    ASTNode(NodeType.NUMBER, value=val2),
+                                ],
+                            ),
+                        ],
+                    ),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op),
+                            ASTNode(NodeType.SYMBOL, value="x"),
+                            ASTNode(NodeType.SYMBOL, value="y"),
+                        ],
+                    ),
+                ],
+            )
+
+            root = ASTNode(
+                NodeType.LET,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.SYMBOL, value="x"),
+                                    ASTNode(NodeType.NUMBER, value=val1),
+                                ],
+                            ),
+                        ],
+                    ),
+                    inner_let,
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=4,
+                num_nodes=16,
+                num_operators=1,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op],
+            )
+
+        else:  # nesting_depth == 2
+            # Dependent nested: (let ((x 1)) (let ((y (+ x 2))) (+ x y)))
+            val1 = rng.randint(1, 10)
+            val2 = rng.randint(1, 10)
+            op1, op2 = rng.choice(ops), rng.choice(ops)
+
+            inner_let = ASTNode(
+                NodeType.LET,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.SYMBOL, value="y"),
+                                    ASTNode(
+                                        NodeType.LIST,
+                                        children=[
+                                            ASTNode(NodeType.OPERATOR, value=op1),
+                                            ASTNode(NodeType.SYMBOL, value="x"),
+                                            ASTNode(NodeType.NUMBER, value=val2),
+                                        ],
+                                    ),
+                                ],
+                            ),
+                        ],
+                    ),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(NodeType.SYMBOL, value="x"),
+                            ASTNode(NodeType.SYMBOL, value="y"),
+                        ],
+                    ),
+                ],
+            )
+
+            root = ASTNode(
+                NodeType.LET,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.SYMBOL, value="x"),
+                                    ASTNode(NodeType.NUMBER, value=val1),
+                                ],
+                            ),
+                        ],
+                    ),
+                    inner_let,
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=5,
+                num_nodes=19,
+                num_operators=2,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2],
+            )
+
+
+class ConditionalChainTemplate(ProgramTemplate):
+    """Template for nested conditional expressions.
+
+    Example: (if cond1 (if cond2 then2 else2) else1)
+    """
+
+    def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
+        # Vary conditional depth (1-2 levels)
+        depth = rng.choice([1, 2])
+        comp_ops = ["=", "<", ">"]
+
+        if depth == 1:
+            # Simple: (if (= x y) then else)
+            comp_op = rng.choice(comp_ops)
+            val1 = rng.randint(0, 5)
+            val2 = rng.randint(0, 5)
+
+            root = ASTNode(
+                NodeType.IF,
+                children=[
+                    # Condition: (= x y)
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=comp_op),
+                            ASTNode(NodeType.SYMBOL, value="x"),
+                            ASTNode(NodeType.SYMBOL, value="y"),
+                        ],
+                    ),
+                    # Then: val1
+                    ASTNode(NodeType.NUMBER, value=val1),
+                    # Else: val2
+                    ASTNode(NodeType.NUMBER, value=val2),
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=2,
+                num_nodes=7,
+                num_operators=1,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[comp_op],
+            )
+
+        else:  # depth == 2
+            # Nested: (if (= x y) (if (< a b) then2 else2) else1)
+            comp_op1, comp_op2 = rng.choice(comp_ops), rng.choice(comp_ops)
+            val1, val2, val3 = rng.randint(0, 5), rng.randint(0, 5), rng.randint(0, 5)
+
+            inner_if = ASTNode(
+                NodeType.IF,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=comp_op2),
+                            ASTNode(NodeType.SYMBOL, value="a"),
+                            ASTNode(NodeType.SYMBOL, value="b"),
+                        ],
+                    ),
+                    ASTNode(NodeType.NUMBER, value=val2),
+                    ASTNode(NodeType.NUMBER, value=val3),
+                ],
+            )
+
+            root = ASTNode(
+                NodeType.IF,
+                children=[
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=comp_op1),
+                            ASTNode(NodeType.SYMBOL, value="x"),
+                            ASTNode(NodeType.SYMBOL, value="y"),
+                        ],
+                    ),
+                    inner_if,
+                    ASTNode(NodeType.NUMBER, value=val1),
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=3,
+                num_nodes=12,
+                num_operators=2,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[comp_op1, comp_op2],
+            )
+
+
+class MixedArithmeticTemplate(ProgramTemplate):
+    """Template for mixed arithmetic with varying asymmetric structures.
+
+    Variations:
+    - 2-way mix: (+ (* a b) c)
+    - Asymmetric: (- (+ (* a b) c) d)
+    - Different depths
+    """
+
+    def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
+        ops = ["+", "-", "*", "/"]
+        structure = rng.choice(["2-way", "asymmetric"])
+
+        if structure == "2-way":
+            # (op1 (op2 a b) c)
+            op1, op2 = rng.choice(ops), rng.choice(ops)
+
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(NodeType.SYMBOL, value="a"),
+                            ASTNode(NodeType.SYMBOL, value="b"),
+                        ],
+                    ),
+                    ASTNode(NodeType.SYMBOL, value="c"),
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=2,
+                num_nodes=7,
+                num_operators=2,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2],
+            )
+
+        else:  # asymmetric
+            # (op1 (op2 (op3 a b) c) d)
+            op1, op2, op3 = rng.choice(ops), rng.choice(ops), rng.choice(ops)
+
+            root = ASTNode(
+                NodeType.LIST,
+                children=[
+                    ASTNode(NodeType.OPERATOR, value=op1),
+                    ASTNode(
+                        NodeType.LIST,
+                        children=[
+                            ASTNode(NodeType.OPERATOR, value=op2),
+                            ASTNode(
+                                NodeType.LIST,
+                                children=[
+                                    ASTNode(NodeType.OPERATOR, value=op3),
+                                    ASTNode(NodeType.SYMBOL, value="a"),
+                                    ASTNode(NodeType.SYMBOL, value="b"),
+                                ],
+                            ),
+                            ASTNode(NodeType.SYMBOL, value="c"),
+                        ],
+                    ),
+                    ASTNode(NodeType.SYMBOL, value="d"),
+                ],
+            )
+
+            return root, ProgramMetadata(
+                template_id=self.template_id,
+                depth=3,
+                num_nodes=10,
+                num_operators=3,
+                has_recursion=False,
+                has_variables=True,
+                operator_types=[op1, op2, op3],
+            )
 
 
 class SyntheticGenerator:
@@ -253,10 +783,13 @@ class SyntheticGenerator:
     def __init__(self, seed: int = 42) -> None:
         self.rng = random.Random(seed)
         self.templates = [
-            ArithmeticTemplate("arithmetic", "Basic arithmetic expressions"),
+            ArithmeticTemplate("arithmetic", "Basic arithmetic expressions with varying structure"),
             RecursionTemplate("recursion", "Recursive function definitions"),
             LambdaTemplate("lambda", "Higher-order functions with lambdas"),
-            LetBindingTemplate("let", "Variable scoping with let bindings"),
+            LetBindingTemplate("let", "Variable scoping with varying bindings"),
+            NestedLetTemplate("nested_let", "Nested let bindings"),
+            ConditionalChainTemplate("conditional", "Nested conditional expressions"),
+            MixedArithmeticTemplate("mixed_arith", "Mixed arithmetic with asymmetric structures"),
         ]
         self.asg_builder = ASGBuilder()
 
