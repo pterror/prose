@@ -59,6 +59,200 @@
 - Current implementation uses a single encoding/decoding layer at full resolution as a prototype.
 - Phase 2 will implement proper unpooling with skip connections.
 
+### 6. Attention Mechanisms: Implicit vs Explicit
+
+**Question**: Do we need explicit Transformer-style attention on top of the Graph U-Net?
+
+**Answer**: No. The ASG structure already provides "implicit attention" via message passing along graph edges, which is more appropriate for code than free-form all-to-all attention.
+
+#### Why Transformer Attention Exists
+
+```python
+# Transformers: Every token attends to every other token
+attention_weights = softmax(Q @ K^T / sqrt(d_k))  # [N, N] matrix
+output = attention_weights @ V
+
+# Pros: Learns dynamic, input-dependent relationships
+# Cons: O(N²) memory and compute, no structural bias
+```
+
+**Transformers use attention because:**
+
+- Natural language has fluid, context-dependent relationships
+- Linear sequences have no inherent structure
+- Need to learn "soft" alignments dynamically (e.g., pronoun resolution)
+
+#### How ASG Provides Implicit Attention
+
+Our graph edges **encode the relationships** that attention would need to learn:
+
+**1. Syntactic Structure (CHILD Edges)**
+
+```lisp
+(define (foo x)
+  (+ x 1))
+```
+
+CHILD edges: `define` → `foo`, `define` → `body`, `+` → `x`, `+` → `1`
+
+- **Transformer approach**: Must learn that operators attend to their arguments
+- **ASG approach**: Parent-child relationships are explicitly encoded
+
+**2. Sequential Context (SIBLING Edges)**
+
+```lisp
+(let ((a 1) (b 2) (c 3)) ...)
+```
+
+SIBLING edges: `a → b → c` (evaluation order)
+
+- **Transformer approach**: Uses positional encodings to track sequence
+- **ASG approach**: Makes sequence explicit via directed edges
+
+**3. Long-Range Dependencies (DATAFLOW Edges)**
+
+**This is the key insight.** The original motivation for ASG over AST!
+
+```lisp
+(define (factorial n)
+  (if (< n 1)
+      1
+      (* n (factorial (- n 1)))))
+```
+
+DATAFLOW edges directly connect:
+
+- Variable definition (`n` parameter) → all usages of `n` (4 edges)
+- Function name (`factorial`) → recursive call
+
+**Implementation** (from `src/data/asg_builder.py`):
+
+```python
+def _add_dataflow_edges(self, root_id: int) -> None:
+    """Add DataFlow edges from variable definitions to uses."""
+    for node_id in self.graph.nodes():
+        if node_data["node_type"] == NodeType.SYMBOL.value:
+            symbol_name = node_data.get("value")
+
+            if symbol_name in self.symbol_table:
+                # Direct edge: definition → usage (O(1) lookup!)
+                for def_id in self.symbol_table[symbol_name]:
+                    self.graph.add_edge(
+                        def_id, node_id,
+                        edge_type=EdgeType.DATAFLOW.value
+                    )
+```
+
+**Comparison:**
+
+| Problem                   | Transformer Solution                | ASG Solution                |
+| ------------------------- | ----------------------------------- | --------------------------- |
+| Find variable definition  | Attend over entire sequence (O(N²)) | Follow DATAFLOW edge (O(1)) |
+| Operator-argument binding | Learn attention patterns            | Encoded in CHILD edges      |
+| Evaluation order          | Positional encoding                 | SIBLING edges               |
+
+**Result**: ASG solves the "long-range dependency problem" that attention was designed for, but in a **structured, O(E) way** instead of O(N²).
+
+#### When Explicit Attention Could Help
+
+There are scenarios where adding attention _on top of_ ASG structure might be beneficial:
+
+**1. Dynamic Edge Importance (Graph Attention Networks)**
+
+```python
+# GAT: Learn which edges matter more
+alpha_ij = attention_score(node_i, node_j)  # Learnable weight
+message = Σ alpha_ij * node_j.features
+```
+
+**Use case**: Maybe DATAFLOW edges should have higher weight than SIBLING edges for certain tasks.
+
+**2. Cross-Subgraph Relationships**
+
+If we need to reason about patterns _not_ captured by explicit edges:
+
+- "These two variables have similar names" (semantic similarity)
+- "These functions have similar behavior" (clone detection)
+
+**3. Global Context Aggregation**
+
+When every node needs awareness of the entire program:
+
+- "Is this a recursive function?" (needs global call graph)
+- "What's the maximum nesting depth?" (global property)
+
+**Current solution**: U-Net pooling aggregates global context at the bottleneck layer.
+
+**Alternative**: Add "virtual global node" (like `[CLS]` token in BERT) that connects to all nodes.
+
+#### Multi-Hop Message Passing as Implicit Attention
+
+**Key insight**: Multiple GNN layers already provide multi-hop reasoning:
+
+```python
+# Layer 1: Each node sees 1-hop neighbors
+# Layer 2: Each node sees 2-hop neighbors
+# Layer k: Each node sees k-hop neighbors
+```
+
+**Example**: Variable usage sees definition in 1 hop via DATAFLOW edge:
+
+```
+Layer 0: [symbol 'n']
+Layer 1: [symbol 'n'] + message from [parameter 'n'] (via DATAFLOW)
+Layer 2: [symbol 'n'] + context from entire function signature
+```
+
+This is equivalent to "attending" to all k-hop neighbors, but with structured inductive bias.
+
+#### Connection to Scratchpad Nodes (Phase 1.5)
+
+The **scratchpad architecture** proposed in [`phase1.5.md`](phase1.5.md) is actually a form of structured attention:
+
+```python
+# Scratchpad = learnable "attention anchors"
+scratch_nodes = [s1, s2, ..., s10]  # Virtual reasoning workspace
+
+# Connect scratch to all program nodes
+for si in scratch_nodes:
+    for pj in program_nodes:
+        add_edge(si, pj)  # Bidirectional
+```
+
+**What scratch nodes do:**
+
+- Aggregate global information (like attention pooling)
+- Broadcast to all nodes (like cross-attention)
+- Maintain state across iterations (like recurrent memory)
+
+**Similar to:**
+
+- `[CLS]` token in BERT (global aggregation)
+- Memory networks (explicit reasoning workspace)
+
+**Advantage over full Transformer attention:**
+
+- Fixed number of scratch nodes (e.g., 10) → O(N × 10) instead of O(N²)
+- Can specialize (e.g., "one scratch node tracks test constraints")
+
+#### Design Decision Summary
+
+| Mechanism                      | What It Does                       | Complexity | When to Use                            |
+| ------------------------------ | ---------------------------------- | ---------- | -------------------------------------- |
+| **ASG Edges** (current)        | Encodes syntax, sequence, dataflow | O(E)       | Default (proven effective in Phase 1)  |
+| **GNN Message Passing**        | Multi-hop propagation              | O(E × L)   | Always (core architecture)             |
+| **Graph Attention (GAT)**      | Learns edge importance             | O(E)       | If ablation shows edges need weighting |
+| **Scratchpad Nodes**           | Global reasoning workspace         | O(N × K)   | For iterative refinement (Phase 1.5)   |
+| **Full Transformer Attention** | All-to-all pairwise                | O(N²)      | **Avoid** (loses structural bias)      |
+
+**Current decision**: Use ASG structure + GAT message passing. Explicit attention is **implicit** via edges, which is ideal for code's inherent structure.
+
+**When to revisit**:
+
+- If Phase 1.5 error analysis shows model isn't using DATAFLOW edges effectively
+- If specific failure modes emerge (e.g., deep recursion, complex scoping)
+- If we need dynamic, input-dependent edge weights for refinement
+
 ### 4. Denoising Auto-Encoder Task
 
 **Decision**: Mask 20% of nodes, predict original node types (not pure diffusion yet).

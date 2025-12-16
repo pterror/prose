@@ -722,6 +722,10 @@ def generate_program(
 2. Should we **cache** execution results (memoization)?
 3. How to handle **infinite loops** or **timeouts**?
 
+> [!NOTE] > **Attention Mechanisms**: For discussion on why we don't use explicit Transformer-style attention (and how ASG structure provides implicit attention via DATAFLOW edges), see [`architecture.md`](architecture.md#attention-mechanisms-implicit-vs-explicit).
+
+---
+
 # 'Hybrid' numeric representation
 
 ## Representation Option: Hybrid - Types + Continuous Values
