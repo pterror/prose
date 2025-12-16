@@ -16,11 +16,13 @@ class TestPositionEncodings:
         builder = ASGBuilder()
         data = builder.build(ast)
 
-        # Node features: [node_type, depth, sibling_index]
-        assert data.x.shape == (1, 3), "Node features should be 3D"
-        assert data.x[0, 0].item() == NodeType.SYMBOL.value
-        assert data.x[0, 1].item() == 0, "Root depth should be 0"
-        assert data.x[0, 2].item() == 0, "Root sibling_index should be 0"
+        # Node features: [token_id, prev_token_id, depth, sibling_index, iteration, test_signal]
+        assert data.x.shape == (1, 6), "Node features should be 6D"
+        assert data.x[0, 0].item() == NodeType.SYMBOL.value  # token_id (no vocab = node_type)
+        assert data.x[0, 2].item() == 0, "Root depth should be 0"
+        assert data.x[0, 3].item() == 0, "Root sibling_index should be 0"
+        assert data.x[0, 4].item() == 0, "Default iteration should be 0"
+        assert data.x[0, 5].item() == 0.0, "Default test_signal should be 0.0"
 
     def test_first_child_position(self):
         """First child should have depth=1, sibling_index=0."""
@@ -38,16 +40,16 @@ class TestPositionEncodings:
         data = builder.build(ast)
 
         # 4 nodes: LIST (root), OPERATOR, NUMBER, NUMBER
-        assert data.x.shape == (4, 3)
+        assert data.x.shape == (4, 6)
 
-        # Root: LIST
-        assert data.x[0, 1].item() == 0, "Root depth = 0"
-        assert data.x[0, 2].item() == 0, "Root sibling_index = 0"
+        # Root: LIST (indices: 0=token_id, 2=depth, 3=sibling_index)
+        assert data.x[0, 2].item() == 0, "Root depth = 0"
+        assert data.x[0, 3].item() == 0, "Root sibling_index = 0"
 
         # First child: OPERATOR
         assert data.x[1, 0].item() == NodeType.OPERATOR.value
-        assert data.x[1, 1].item() == 1, "First child depth = 1"
-        assert data.x[1, 2].item() == 0, "First child sibling_index = 0"
+        assert data.x[1, 2].item() == 1, "First child depth = 1"
+        assert data.x[1, 3].item() == 0, "First child sibling_index = 0"
 
     def test_second_child_position(self):
         """Second child should have depth=1, sibling_index=1."""
@@ -66,13 +68,13 @@ class TestPositionEncodings:
 
         # Second child: NUMBER (value=1)
         assert data.x[2, 0].item() == NodeType.NUMBER.value
-        assert data.x[2, 1].item() == 1, "Second child depth = 1"
-        assert data.x[2, 2].item() == 1, "Second child sibling_index = 1"
+        assert data.x[2, 2].item() == 1, "Second child depth = 1"
+        assert data.x[2, 3].item() == 1, "Second child sibling_index = 1"
 
         # Third child: NUMBER (value=2)
         assert data.x[3, 0].item() == NodeType.NUMBER.value
-        assert data.x[3, 1].item() == 1, "Third child depth = 1"
-        assert data.x[3, 2].item() == 2, "Third child sibling_index = 2"
+        assert data.x[3, 2].item() == 1, "Third child depth = 1"
+        assert data.x[3, 3].item() == 2, "Third child sibling_index = 2"
 
     def test_nested_structure(self):
         """Test nested structure with depth=2."""
@@ -100,25 +102,25 @@ class TestPositionEncodings:
         assert data.x.shape[0] == 7
 
         # Root LIST: depth=0
-        assert data.x[0, 1].item() == 0
+        assert data.x[0, 2].item() == 0
 
         # OPERATOR(+): depth=1, sibling_index=0
-        assert data.x[1, 1].item() == 1
-        assert data.x[1, 2].item() == 0
+        assert data.x[1, 2].item() == 1
+        assert data.x[1, 3].item() == 0
 
         # Nested LIST: depth=1, sibling_index=1
         assert data.x[2, 0].item() == NodeType.LIST.value
-        assert data.x[2, 1].item() == 1
         assert data.x[2, 2].item() == 1
+        assert data.x[2, 3].item() == 1
 
         # OPERATOR(-): depth=2, sibling_index=0 (first child of nested LIST)
         assert data.x[3, 0].item() == NodeType.OPERATOR.value
-        assert data.x[3, 1].item() == 2
-        assert data.x[3, 2].item() == 0
+        assert data.x[3, 2].item() == 2
+        assert data.x[3, 3].item() == 0
 
         # NUMBER(3): depth=2, sibling_index=1
-        assert data.x[4, 1].item() == 2
-        assert data.x[4, 2].item() == 1
+        assert data.x[4, 2].item() == 2
+        assert data.x[4, 3].item() == 1
 
     def test_if_expression_positions(self):
         """Test IF expression with 3 children."""
@@ -136,19 +138,19 @@ class TestPositionEncodings:
         data = builder.build(ast)
 
         # 4 nodes: IF, SYMBOL, NUMBER, NUMBER
-        assert data.x.shape == (4, 3)
+        assert data.x.shape == (4, 6)
 
         # Condition: depth=1, sibling_index=0
-        assert data.x[1, 1].item() == 1
-        assert data.x[1, 2].item() == 0
+        assert data.x[1, 2].item() == 1
+        assert data.x[1, 3].item() == 0
 
         # Then branch: depth=1, sibling_index=1
-        assert data.x[2, 1].item() == 1
         assert data.x[2, 2].item() == 1
+        assert data.x[2, 3].item() == 1
 
         # Else branch: depth=1, sibling_index=2
-        assert data.x[3, 1].item() == 1
-        assert data.x[3, 2].item() == 2
+        assert data.x[3, 2].item() == 1
+        assert data.x[3, 3].item() == 2
 
     def test_define_expression_positions(self):
         """Test DEFINE expression with variable binding."""
@@ -165,17 +167,17 @@ class TestPositionEncodings:
         data = builder.build(ast)
 
         # 2 nodes: DEFINE, NUMBER
-        assert data.x.shape == (2, 3)
+        assert data.x.shape == (2, 6)
 
         # DEFINE root: depth=0, sibling_index=0
         assert data.x[0, 0].item() == NodeType.DEFINE.value
-        assert data.x[0, 1].item() == 0
         assert data.x[0, 2].item() == 0
+        assert data.x[0, 3].item() == 0
 
         # NUMBER child: depth=1, sibling_index=0
         assert data.x[1, 0].item() == NodeType.NUMBER.value
-        assert data.x[1, 1].item() == 1
-        assert data.x[1, 2].item() == 0
+        assert data.x[1, 2].item() == 1
+        assert data.x[1, 3].item() == 0
 
 
 class TestPositionEncodingEdgeCases:
@@ -188,9 +190,9 @@ class TestPositionEncodingEdgeCases:
         builder = ASGBuilder()
         data = builder.build(ast)
 
-        assert data.x.shape == (1, 3)
-        assert data.x[0, 1].item() == 0  # depth
-        assert data.x[0, 2].item() == 0  # sibling_index
+        assert data.x.shape == (1, 6)
+        assert data.x[0, 2].item() == 0  # depth
+        assert data.x[0, 3].item() == 0  # sibling_index
 
     def test_many_siblings(self):
         """Test with many siblings (e.g., 10 children)."""
@@ -201,13 +203,13 @@ class TestPositionEncodingEdgeCases:
         data = builder.build(ast)
 
         # 11 nodes: LIST + 10 NUMBERs
-        assert data.x.shape == (11, 3)
+        assert data.x.shape == (11, 6)
 
         # Check all sibling indices
         for i in range(10):
             node_idx = i + 1  # Skip root LIST
-            assert data.x[node_idx, 1].item() == 1  # All at depth 1
-            assert data.x[node_idx, 2].item() == i  # Sibling index = i
+            assert data.x[node_idx, 2].item() == 1  # All at depth 1
+            assert data.x[node_idx, 3].item() == i  # Sibling index = i
 
     def test_deep_nesting(self):
         """Test deeply nested structure (depth=5)."""
@@ -220,9 +222,9 @@ class TestPositionEncodingEdgeCases:
         data = builder.build(ast)
 
         # 6 nodes: 5 LISTs + 1 SYMBOL
-        assert data.x.shape == (6, 3)
+        assert data.x.shape == (6, 6)
 
         # Check depths: 0, 1, 2, 3, 4, 5
         expected_depths = [0, 1, 2, 3, 4, 5]
-        actual_depths = [data.x[i, 1].item() for i in range(6)]
+        actual_depths = [data.x[i, 2].item() for i in range(6)]
         assert actual_depths == expected_depths

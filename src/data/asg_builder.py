@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 import networkx as nx
 import torch
@@ -46,17 +46,29 @@ class ASTNode:
 class ASGBuilder:
     """Converts Mini-Lisp AST to Abstract Syntax Graph with DataFlow edges."""
 
-    def __init__(self) -> None:
+    def __init__(self, vocabulary: Optional[Any] = None) -> None:
+        """Initialize ASG builder.
+
+        Args:
+            vocabulary: Optional Vocabulary instance for token-level encoding.
+                       If None, uses legacy node_type encoding.
+        """
         self.graph = nx.DiGraph()
         self.node_counter = 0
         self.symbol_table: dict[str, list[int]] = {}  # symbol -> node IDs where defined
+        self.vocabulary = vocabulary
 
-    def build(self, ast_root: ASTNode) -> Data:
+    def build(self, ast_root: ASTNode, iteration: int = 0,
+              prev_token_ids: Optional[torch.Tensor] = None,
+              test_signals: Optional[torch.Tensor] = None) -> Data:
         """
         Convert AST to PyG Data object representing the ASG.
 
         Args:
             ast_root: Root node of the AST
+            iteration: Current refinement iteration (default: 0)
+            prev_token_ids: Token IDs from previous iteration (optional)
+            test_signals: Test failure signals per node (optional)
 
         Returns:
             PyG Data object with node features and edges
@@ -72,7 +84,7 @@ class ASGBuilder:
         self._add_dataflow_edges(root_id)
 
         # Convert to PyG format
-        return self._to_pyg_data()
+        return self._to_pyg_data(iteration, prev_token_ids, test_signals)
 
     def _add_tree_edges(
         self, node: ASTNode, parent_id: int | None, depth: int = 0, sibling_index: int = 0
@@ -149,24 +161,107 @@ class ASGBuilder:
                                     def_id, node_id, edge_type=EdgeType.DATAFLOW.value
                                 )
 
-    def _to_pyg_data(self) -> Data:
-        """Convert NetworkX graph to PyTorch Geometric Data object."""
+    def _node_to_token(self, node_type: NodeType, value: Any) -> str:
+        """Convert AST node to token string.
+
+        Args:
+            node_type: Type of the AST node
+            value: Value stored in the node
+
+        Returns:
+            Token string representation
+        """
+        # Structural keywords
+        if node_type == NodeType.DEFINE:
+            return "define"
+        elif node_type == NodeType.LAMBDA:
+            return "lambda"
+        elif node_type == NodeType.IF:
+            return "if"
+        elif node_type == NodeType.LET:
+            return "let"
+        elif node_type == NodeType.LIST:
+            return "("  # LIST nodes are represented by opening paren
+        # Value-carrying nodes
+        elif value is not None:
+            return str(value)
+        # Fallback
+        else:
+            return "<UNK>"
+
+    def _to_pyg_data(self, iteration: int = 0,
+                     prev_token_ids: Optional[torch.Tensor] = None,
+                     test_signals: Optional[torch.Tensor] = None) -> Data:
+        """Convert NetworkX graph to PyTorch Geometric Data object.
+
+        Args:
+            iteration: Current refinement iteration
+            prev_token_ids: Token IDs from previous iteration (optional)
+            test_signals: Test failure signals per node (optional)
+
+        Returns:
+            PyG Data object with 6 features per node:
+            - [0] token_id (or node_type if no vocabulary)
+            - [1] prev_token_id (or mask/same as token_id)
+            - [2] depth
+            - [3] sibling_index
+            - [4] iteration
+            - [5] test_signal (0.0 if not provided)
+        """
         num_nodes = len(self.graph.nodes())
 
-        # Create node feature matrix with position encodings
-        # Shape: [num_nodes, 3] where columns are [node_type, depth, sibling_index]
+        # Get mask token ID
+        mask_token_id = self.vocabulary.mask_token_id if self.vocabulary else 0
+
+        # Create node feature matrix
         node_features = []
         for i in range(num_nodes):
             node_data = self.graph.nodes[i]
-            node_features.append(
-                [
-                    node_data["node_type"],
-                    node_data["depth"],
-                    node_data["sibling_index"],
-                ]
-            )
 
-        x = torch.tensor(node_features, dtype=torch.long)
+            # Feature 0: token_id (or node_type for backward compat)
+            if self.vocabulary:
+                token = self._node_to_token(
+                    NodeType(node_data["node_type"]),
+                    node_data.get("value")
+                )
+                token_id = self.vocabulary.encode(token)
+            else:
+                token_id = node_data["node_type"]
+
+            # Feature 1: prev_token_id (default to current token or mask)
+            if prev_token_ids is not None and i < len(prev_token_ids):
+                prev_token_id = int(prev_token_ids[i])
+            else:
+                prev_token_id = mask_token_id if self.vocabulary else token_id
+
+            # Feature 2-3: depth, sibling_index (unchanged)
+            depth = node_data["depth"]
+            sibling_index = node_data["sibling_index"]
+
+            # Feature 4: iteration
+            iter_val = iteration
+
+            # Feature 5: test_signal
+            if test_signals is not None and i < len(test_signals):
+                test_signal = float(test_signals[i])
+            else:
+                test_signal = 0.0
+
+            node_features.append([
+                token_id,
+                prev_token_id,
+                depth,
+                sibling_index,
+                iter_val,
+                test_signal
+            ])
+
+        # Convert to tensor
+        # First 5 features are integers, last is float
+        x_int = torch.tensor([[f[0], f[1], f[2], f[3], f[4]] for f in node_features],
+                             dtype=torch.long)
+        x_float = torch.tensor([[f[5]] for f in node_features], dtype=torch.float)
+        x = torch.cat([x_int.float(), x_float], dim=1)
 
         # Create edge index and edge attributes
         edge_list = list(self.graph.edges(data=True))
@@ -177,7 +272,11 @@ class ASGBuilder:
             edge_index = torch.empty((2, 0), dtype=torch.long)
             edge_attr = torch.empty((0,), dtype=torch.long)
 
-        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
+        # Store original node types for backward compatibility
+        node_types = torch.tensor([self.graph.nodes[i]["node_type"]
+                                  for i in range(num_nodes)], dtype=torch.long)
+
+        return Data(x=x, edge_index=edge_index, edge_attr=edge_attr, node_type=node_types)
 
     def to_json(self, data: Data) -> dict[str, Any]:
         """Serialize PyG Data to JSON-serializable dict."""
