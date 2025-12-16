@@ -44,6 +44,7 @@ cache/
 
 # generated data
 data/
+!src/data/
 
 # compile cache
 __pycache__/

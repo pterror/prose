@@ -824,6 +824,68 @@ class SyntheticGenerator:
                 LambdaWithLetTemplate("lambda_let", "Lambda with LET"),
             ]
         )
+
+        # Add mega templates for even more diversity
+        from src.data.mega_templates import (
+            QuotedListTemplate,
+            LambdaMultiParamTemplate,
+            CondWithLetTemplate,
+            DeepNestedArithTemplate,
+            ConsTemplate,
+            CarCdrTemplate,
+            BeginTemplate,
+            AndOrTemplate,
+            NotTemplate,
+            ApplyTemplate,
+            MapTemplate,
+            FilterTemplate,
+        )
+
+        self.templates.extend(
+            [
+                QuotedListTemplate("quoted_list", "Quoted lists"),
+                LambdaMultiParamTemplate("lambda_multi", "Multi-param lambda"),
+                CondWithLetTemplate("cond_let", "Conditional with LET"),
+                DeepNestedArithTemplate("deep_arith", "Deep nested arithmetic"),
+                ConsTemplate("cons", "Cons operations"),
+                CarCdrTemplate("car_cdr", "Car/Cdr operations"),
+                BeginTemplate("begin", "Begin sequences"),
+                AndOrTemplate("and_or", "AND/OR operations"),
+                NotTemplate("not", "NOT operations"),
+                ApplyTemplate("apply", "Apply operations"),
+                MapTemplate("map", "Map operations"),
+                FilterTemplate("filter", "Filter operations"),
+            ]
+        )
+
+        # Add ultra templates for final diversity push
+        from src.data.ultra_templates import (
+            SymbolPairTemplate,
+            TripleArithTemplate,
+            DefineArithTemplate,
+            DefineLambdaTemplate,
+            WideBalancedTemplate,
+            LetIfTemplate,
+            IfNestedDeepTemplate,
+            LambdaNestedTemplate,
+            RecursiveSumTemplate,
+            FoldTemplate,
+        )
+
+        self.templates.extend(
+            [
+                SymbolPairTemplate("symbol_pair", "Symbol pairs"),
+                TripleArithTemplate("triple_arith", "Triple arithmetic"),
+                DefineArithTemplate("define_arith", "Define with arithmetic"),
+                DefineLambdaTemplate("define_lambda", "Define lambda"),
+                WideBalancedTemplate("wide_balanced", "Wide balanced tree"),
+                LetIfTemplate("let_if", " LET with IF"),
+                IfNestedDeepTemplate("if_nested", "Deeply nested IF"),
+                LambdaNestedTemplate("lambda_nested", "Nested lambda"),
+                RecursiveSumTemplate("rec_sum", "Recursive sum"),
+                FoldTemplate("fold", "Fold/reduce"),
+            ]
+        )
         self.asg_builder = ASGBuilder()
 
         # Diversity tracking
