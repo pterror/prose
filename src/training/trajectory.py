@@ -75,9 +75,8 @@ class TrajectoryGenerator:
 
         # 2. Simulate refinement iterations
         for iteration in range(max_iterations):
-            # Compute test signals (all zeros for now - would need AST reconstruction)
-            # In full implementation, would execute tests and trace failures
-            test_signals = torch.zeros(current_graph.x.size(0))
+            # Compute test signals from test execution
+            test_signals = self._compute_test_signals(current_graph, tests)
 
             # Store trajectory step
             trajectory.append(TrajectoryStep(
@@ -193,6 +192,69 @@ class TrajectoryGenerator:
             corrupted.x[idx, 1] = self.mask_token_id  # prev_token_id
 
         return corrupted
+
+    def _compute_test_signals(
+        self,
+        graph: Data,
+        tests: List[TestCase],
+    ) -> torch.Tensor:
+        """
+        Execute tests on reconstructed program and compute failure signals.
+
+        Args:
+            graph: Current program graph
+            tests: Test cases to execute
+
+        Returns:
+            Tensor [num_nodes] with 1.0 for nodes on failing test execution paths
+        """
+        num_nodes = graph.x.size(0)
+        test_signals = torch.zeros(num_nodes)
+
+        # Try to reconstruct AST from graph
+        try:
+            from src.data.asg_reconstructor import ASGReconstructor, ReconstructionError
+
+            reconstructor = ASGReconstructor(self.builder.vocabulary)
+            ast_root, graph_to_ast_map = reconstructor.reconstruct(graph)
+        except (ReconstructionError, Exception) as e:
+            # Graph too corrupted to reconstruct - return zeros
+            return test_signals
+
+        # Build reverse mapping: AST object ID → graph index
+        ast_to_graph_map = {v: k for k, v in graph_to_ast_map.items()}
+
+        # Execute each test
+        for test in tests:
+            try:
+                # Run test
+                self.interpreter.trace_mode = False  # Disable tracing for test execution
+                test_results = self.interpreter.run_tests(ast_root, [test])
+
+                # If test fails, trace which nodes were executed
+                if not test_results[0]:
+                    # Re-run with tracing to get execution path
+                    self.interpreter.trace_mode = True
+                    self.interpreter.traced_nodes.clear()
+                    self.interpreter.node_id_map.clear()
+
+                    traced_ast_ids = self.interpreter.trace_execution(ast_root, test.inputs)
+
+                    # Map AST object IDs back to graph indices
+                    for ast_id in traced_ast_ids:
+                        if ast_id in ast_to_graph_map:
+                            graph_idx = ast_to_graph_map[ast_id]
+                            if 0 <= graph_idx < num_nodes:
+                                test_signals[graph_idx] = 1.0
+
+            except Exception:
+                # Test execution failed - skip this test
+                continue
+            finally:
+                # Reset trace mode
+                self.interpreter.trace_mode = False
+
+        return test_signals
 
 
 def corrupt_program_curriculum(
