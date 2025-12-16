@@ -296,3 +296,148 @@ def compute_metrics(
     """
     metrics_calculator = DenoisingMetrics(num_node_types=num_node_types)
     return metrics_calculator.compute_all(predictions, ground_truth)
+
+
+class IterativeRefinementMetrics:
+    """
+    Metrics for Phase 1.5 iterative refinement evaluation.
+
+    Tracks metrics across multiple refinement iterations.
+    """
+
+    def __init__(self, vocab_size: int):
+        """
+        Initialize metrics calculator.
+
+        Args:
+            vocab_size: Size of token vocabulary
+        """
+        self.vocab_size = vocab_size
+
+    def compute_iteration_metrics(
+        self,
+        current_graph: Data,
+        target_graph: Data,
+        predictions: dict[str, torch.Tensor],
+    ) -> dict[str, float]:
+        """
+        Compute metrics for a single iteration.
+
+        Args:
+            current_graph: Current corrupted state
+            target_graph: Ground truth graph
+            predictions: Model output (logits, confidence)
+
+        Returns:
+            Dict with metrics: accuracy, precision, recall, f1, confidence
+        """
+        logits = predictions['logits']
+        confidence = predictions['confidence']
+
+        # Extract token IDs
+        current_tokens = current_graph.x[:, 0].long()
+        target_tokens = target_graph.x[:, 0].long()
+        predicted_tokens = logits.argmax(dim=-1)
+
+        # Basic accuracy
+        accuracy = (predicted_tokens == target_tokens).float().mean()
+
+        # Identify correct vs incorrect current nodes
+        correct_mask = (current_tokens == target_tokens)
+        incorrect_mask = ~correct_mask
+
+        # Precision: of nodes we predicted to change, how many were actually wrong?
+        changed_mask = (predicted_tokens != current_tokens)
+        if changed_mask.any():
+            # True positives: changed nodes that became correct
+            tp = ((changed_mask) & (predicted_tokens == target_tokens)).sum()
+            # False positives: changed nodes that are still wrong
+            fp = ((changed_mask) & (predicted_tokens != target_tokens)).sum()
+            precision = tp.float() / (tp + fp).float() if (tp + fp) > 0 else torch.tensor(0.0)
+        else:
+            precision = torch.tensor(1.0)
+
+        # Recall: of nodes that were wrong, how many did we fix?
+        if incorrect_mask.any():
+            fixed = ((incorrect_mask) & (predicted_tokens == target_tokens)).sum()
+            total_wrong = incorrect_mask.sum()
+            recall = fixed.float() / total_wrong.float()
+        else:
+            recall = torch.tensor(1.0)
+
+        # F1 score
+        if precision + recall > 0:
+            f1 = 2 * (precision * recall) / (precision + recall)
+        else:
+            f1 = torch.tensor(0.0)
+
+        # Stability: of correct nodes, how many did we keep correct?
+        if correct_mask.any():
+            kept_correct = ((correct_mask) & (predicted_tokens == target_tokens)).sum()
+            stability = kept_correct.float() / correct_mask.sum().float()
+        else:
+            stability = torch.tensor(1.0)
+
+        # Confidence metrics
+        mean_confidence = confidence.mean()
+        correct_confidence = confidence[predicted_tokens == target_tokens].mean() if (predicted_tokens == target_tokens).any() else torch.tensor(0.0)
+        incorrect_confidence = confidence[predicted_tokens != target_tokens].mean() if (predicted_tokens != target_tokens).any() else torch.tensor(0.0)
+
+        return {
+            'accuracy': accuracy.item(),
+            'precision': precision.item(),
+            'recall': recall.item(),
+            'f1': f1.item(),
+            'stability': stability.item(),
+            'mean_confidence': mean_confidence.item(),
+            'correct_confidence': correct_confidence.item(),
+            'incorrect_confidence': incorrect_confidence.item(),
+            'num_correct': (predicted_tokens == target_tokens).sum().item(),
+            'num_incorrect': (predicted_tokens != target_tokens).sum().item(),
+            'num_changed': changed_mask.sum().item(),
+        }
+
+    def compute_trajectory_metrics(
+        self,
+        trajectory_history: list[dict[str, Any]],
+    ) -> dict[str, float]:
+        """
+        Compute aggregate metrics over a refinement trajectory.
+
+        Args:
+            trajectory_history: List of iteration metrics
+
+        Returns:
+            Dict with aggregate metrics
+        """
+        if not trajectory_history:
+            return {}
+
+        # Final metrics
+        final = trajectory_history[-1]
+
+        # Improvement over iterations
+        initial_accuracy = trajectory_history[0]['accuracy']
+        final_accuracy = final['accuracy']
+        improvement = final_accuracy - initial_accuracy
+
+        # Convergence metrics
+        num_iterations = len(trajectory_history)
+        converged = final.get('num_changed', 1) == 0
+        perfect = final['accuracy'] == 1.0
+
+        # Average confidence progression
+        avg_confidence = sum(step['mean_confidence'] for step in trajectory_history) / num_iterations
+
+        return {
+            'initial_accuracy': initial_accuracy,
+            'final_accuracy': final_accuracy,
+            'improvement': improvement,
+            'num_iterations': num_iterations,
+            'converged': float(converged),
+            'perfect': float(perfect),
+            'avg_confidence': avg_confidence,
+            'final_f1': final.get('f1', 0.0),
+            'final_precision': final.get('precision', 0.0),
+            'final_recall': final.get('recall', 0.0),
+        }
