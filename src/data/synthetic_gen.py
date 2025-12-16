@@ -2,11 +2,12 @@
 
 import json
 import random
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from src.data.asg_builder import ASTNode, ASGBuilder, NodeType
+from src.runtime.interpreter import TestCase
 
 
 @dataclass
@@ -20,6 +21,7 @@ class ProgramMetadata:
     has_recursion: bool
     has_variables: bool
     operator_types: list[str]
+    tests: list[TestCase] = field(default_factory=list)
 
 
 class ProgramTemplate:
@@ -30,8 +32,28 @@ class ProgramTemplate:
         self.description = description
 
     def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
-        """Generate a program instance from this template."""
+        """Generate a program instance from this template.
+
+        Returns:
+            (ast, metadata) where metadata.tests contains test cases
+        """
         raise NotImplementedError
+
+    def generate_tests(
+        self, program: ASTNode, rng: random.Random, num_tests: int = 3
+    ) -> list[TestCase]:
+        """Generate test cases for a program.
+
+        Args:
+            program: The AST of the program
+            rng: Random number generator
+            num_tests: Number of test cases to generate
+
+        Returns:
+            List of TestCase instances with inputs and expected outputs
+        """
+        # Default implementation - subclasses should override
+        return []
 
 
 class ArithmeticTemplate(ProgramTemplate):
