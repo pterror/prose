@@ -187,186 +187,74 @@ class ArithmeticTemplate(ProgramTemplate):
 
 
 class RecursionTemplate(ProgramTemplate):
-    """Template for recursive functions with varying structures.
-
-    Variations:
-    - Standard recursion with different operators (*, +, max)
-    - Different comparison operators (=, <, >)
-    - Tail-recursive style
-    - Varying base values
-    """
+    """Template for recursive functions: (define (fact n) (if (= n 0) 1 ...))"""
 
     def generate(self, rng: random.Random) -> tuple[ASTNode, ProgramMetadata]:
-        func_name = rng.choice(["fact", "fib", "sum", "power"])
+        func_name = rng.choice(["fact", "fib", "sum"])
         param = "n"
         base_val = rng.randint(0, 2)
 
-        # Vary the recursive pattern
-        pattern = rng.choice(["multiply", "add", "tail_recursive"])
-        comp_op = rng.choice(["=", "<", ">"])
-
-        if pattern == "multiply":
-            # Standard: (* param (func_name (- param 1)))
-            recursive_op = "*"
-            root = ASTNode(
-                NodeType.DEFINE,
-                value=func_name,
-                children=[
-                    ASTNode(
-                        NodeType.LIST,
-                        children=[
-                            ASTNode(NodeType.SYMBOL, value=func_name),
-                            ASTNode(NodeType.SYMBOL, value=param),
-                        ],
-                    ),
-                    ASTNode(
-                        NodeType.IF,
-                        children=[
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.OPERATOR, value=comp_op),
-                                    ASTNode(NodeType.SYMBOL, value=param),
-                                    ASTNode(NodeType.NUMBER, value=base_val),
-                                ],
-                            ),
-                            ASTNode(NodeType.NUMBER, value=1),
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.OPERATOR, value=recursive_op),
-                                    ASTNode(NodeType.SYMBOL, value=param),
-                                    ASTNode(
-                                        NodeType.LIST,
-                                        children=[
-                                            ASTNode(NodeType.SYMBOL, value=func_name),
-                                            ASTNode(
-                                                NodeType.LIST,
-                                                children=[
-                                                    ASTNode(NodeType.OPERATOR, value="-"),
-                                                    ASTNode(NodeType.SYMBOL, value=param),
-                                                    ASTNode(NodeType.NUMBER, value=1),
-                                                ],
-                                            ),
-                                        ],
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            )
-
-        elif pattern == "add":
-            # Addition: (+ param (func_name (- param 1)))
-            recursive_op = "+"
-            root = ASTNode(
-                NodeType.DEFINE,
-                value=func_name,
-                children=[
-                    ASTNode(
-                        NodeType.LIST,
-                        children=[
-                            ASTNode(NodeType.SYMBOL, value=func_name),
-                            ASTNode(NodeType.SYMBOL, value=param),
-                        ],
-                    ),
-                    ASTNode(
-                        NodeType.IF,
-                        children=[
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.OPERATOR, value=comp_op),
-                                    ASTNode(NodeType.SYMBOL, value=param),
-                                    ASTNode(NodeType.NUMBER, value=base_val),
-                                ],
-                            ),
-                            ASTNode(NodeType.NUMBER, value=0),  # Different base case
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.OPERATOR, value=recursive_op),
-                                    ASTNode(NodeType.SYMBOL, value=param),
-                                    ASTNode(
-                                        NodeType.LIST,
-                                        children=[
-                                            ASTNode(NodeType.SYMBOL, value=func_name),
-                                            ASTNode(
-                                                NodeType.LIST,
-                                                children=[
-                                                    ASTNode(NodeType.OPERATOR, value="-"),
-                                                    ASTNode(NodeType.SYMBOL, value=param),
-                                                    ASTNode(NodeType.NUMBER, value=1),
-                                                ],
-                                            ),
-                                        ],
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            )
-
-        else:  # tail_recursive
-            # Simpler tail-recursive style: (if (= n 0) acc (func_name (- n 1) (* acc n)))
-            # Simplified as single parameter for now
-            recursive_op = "-"
-            root = ASTNode(
-                NodeType.DEFINE,
-                value=func_name,
-                children=[
-                    ASTNode(
-                        NodeType.LIST,
-                        children=[
-                            ASTNode(NodeType.SYMBOL, value=func_name),
-                            ASTNode(NodeType.SYMBOL, value=param),
-                        ],
-                    ),
-                    ASTNode(
-                        NodeType.IF,
-                        children=[
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.OPERATOR, value=comp_op),
-                                    ASTNode(NodeType.SYMBOL, value=param),
-                                    ASTNode(NodeType.NUMBER, value=base_val),
-                                ],
-                            ),
-                            ASTNode(
-                                NodeType.SYMBOL, value=param
-                            ),  # Return param instead of constant
-                            ASTNode(
-                                NodeType.LIST,
-                                children=[
-                                    ASTNode(NodeType.SYMBOL, value=func_name),
-                                    ASTNode(
-                                        NodeType.LIST,
-                                        children=[
-                                            ASTNode(NodeType.OPERATOR, value=recursive_op),
-                                            ASTNode(NodeType.SYMBOL, value=param),
-                                            ASTNode(NodeType.NUMBER, value=1),
-                                        ],
-                                    ),
-                                ],
-                            ),
-                        ],
-                    ),
-                ],
-            )
+        # (define (func_name param) (if (= param base_val) 1 (* param (func_name (- param 1)))))
+        root = ASTNode(
+            NodeType.DEFINE,
+            value=func_name,
+            children=[
+                ASTNode(
+                    NodeType.LIST,
+                    children=[
+                        ASTNode(NodeType.SYMBOL, value=func_name),
+                        ASTNode(NodeType.SYMBOL, value=param),
+                    ],
+                ),
+                ASTNode(
+                    NodeType.IF,
+                    children=[
+                        # Condition: (= param base_val)
+                        ASTNode(
+                            NodeType.LIST,
+                            children=[
+                                ASTNode(NodeType.OPERATOR, value="="),
+                                ASTNode(NodeType.SYMBOL, value=param),
+                                ASTNode(NodeType.NUMBER, value=base_val),
+                            ],
+                        ),
+                        # Then: 1
+                        ASTNode(NodeType.NUMBER, value=1),
+                        # Else: (* param (func_name (- param 1)))
+                        ASTNode(
+                            NodeType.LIST,
+                            children=[
+                                ASTNode(NodeType.OPERATOR, value="*"),
+                                ASTNode(NodeType.SYMBOL, value=param),
+                                ASTNode(
+                                    NodeType.LIST,
+                                    children=[
+                                        ASTNode(NodeType.SYMBOL, value=func_name),
+                                        ASTNode(
+                                            NodeType.LIST,
+                                            children=[
+                                                ASTNode(NodeType.OPERATOR, value="-"),
+                                                ASTNode(NodeType.SYMBOL, value=param),
+                                                ASTNode(NodeType.NUMBER, value=1),
+                                            ],
+                                        ),
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ],
+                ),
+            ],
+        )
 
         return root, ProgramMetadata(
             template_id=self.template_id,
             depth=5,
-            num_nodes=15 if pattern == "tail_recursive" else 19,
-            num_operators=2 if pattern == "tail_recursive" else 3,
+            num_nodes=19,
+            num_operators=3,
             has_recursion=True,
             has_variables=True,
-            operator_types=[comp_op, recursive_op if pattern != "multiply" else "*", "-"]
-            if pattern != "tail_recursive"
-            else [comp_op, "-"],
+            operator_types=["=", "*", "-"],
         )
 
 
@@ -903,14 +791,39 @@ class SyntheticGenerator:
             ConditionalChainTemplate("conditional", "Nested conditional expressions"),
             MixedArithmeticTemplate("mixed_arith", "Mixed arithmetic with asymmetric structures"),
         ]
-        
-        # Import and add simple templates for diversity
-        from src.data.simple_templates import SimpleArithTemplate, DefineSimpleTemplate, SimpleIfTemplate
-        self.templates.extend([
-            SimpleArithTemplate("simple_arith", "Simple arithmetic expressions"),
-            DefineSimpleTemplate("simple_define", "Simple variable definitions"),
-            SimpleIfTemplate("simple_if", "Simple conditional expressions"),
-        ])
+
+        # Add simple templates for diversity
+        from src.data.simple_templates import (
+            SimpleArithTemplate,
+            DefineSimpleTemplate,
+            SimpleIfTemplate,
+        )
+        from src.data.extra_templates import (
+            SingleSymbolTemplate,
+            SingleNumberTemplate,
+            ComparisonOnlyTemplate,
+            NestedComparisonTemplate,
+            ListLiteralTemplate,
+            MultiDefineTemplate,
+            IfWithArithBranchesTemplate,
+            LambdaWithLetTemplate,
+        )
+
+        self.templates.extend(
+            [
+                SimpleArithTemplate("simple_arith", "Simple arithmetic"),
+                DefineSimpleTemplate("simple_define", "Simple defines"),
+                SimpleIfTemplate("simple_if", "Simple conditionals"),
+                SingleSymbolTemplate("single_sym", "Single symbol"),
+                SingleNumberTemplate("single_num", "Single number"),
+                ComparisonOnlyTemplate("comparison", "Comparisons"),
+                NestedComparisonTemplate("nested_comp", "Nested comparisons"),
+                ListLiteralTemplate("list_lit", "List literals"),
+                MultiDefineTemplate("multi_define", "Multiple definitions"),
+                IfWithArithBranchesTemplate("if_arith", "IF with arithmetic"),
+                LambdaWithLetTemplate("lambda_let", "Lambda with LET"),
+            ]
+        )
         self.asg_builder = ASGBuilder()
 
         # Diversity tracking
@@ -987,16 +900,5 @@ class SyntheticGenerator:
 
     def _verify_properties(self, metadata: ProgramMetadata) -> bool:
         """Verify that generated program satisfies property constraints."""
-        # Must have non-trivial depth
-        if metadata.depth < 2:
-            return False
-
-        # Must use at least 1 operator
-        if metadata.num_operators < 1:
-            return False
-
-        # Must have at least 1 variable binding
-        if not metadata.has_variables:
-            return False
-
+        # Relaxed constraints for diversity
         return True
