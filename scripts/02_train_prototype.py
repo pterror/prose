@@ -78,7 +78,7 @@ def train_epoch(
         predictions = model.forward_full(corrupted)
 
         # Compute loss
-        loss, metrics = criterion(predictions, original)
+        loss, metrics = criterion(predictions, corrupted, original)
 
         # Backward pass with gradient accumulation
         loss = loss / gradient_accumulation_steps
@@ -141,7 +141,7 @@ def validate(
         predictions = model.forward_full(corrupted)
 
         # Compute loss
-        loss, metrics = criterion(predictions, original)
+        loss, metrics = criterion(predictions, corrupted, original)
 
         total_loss += metrics["loss"]
         total_accuracy += metrics["accuracy"]

@@ -15,13 +15,14 @@ class DenoisingLoss(nn.Module):
         self.num_node_types = num_node_types
 
     def forward(
-        self, predictions: torch.Tensor, targets: Data, mask_token_id: int = 8
+        self, predictions: torch.Tensor, corrupted: Data, targets: Data, mask_token_id: int = 8
     ) -> tuple[torch.Tensor, dict[str, float]]:
         """
         Compute denoising loss.
 
         Args:
             predictions: Predicted node type logits [num_nodes, num_node_types]
+            corrupted: Corrupted graph Data object (to identify masked nodes)
             targets: Original graph Data object with x[:, 0] = node types
             mask_token_id: ID of mask token (nodes to predict)
 
@@ -36,12 +37,28 @@ class DenoisingLoss(nn.Module):
         else:
             target_labels = targets.x[:, 0].long()
 
-        # Only compute loss on masked nodes (optional, for now use all)
-        node_loss = F.cross_entropy(predictions, target_labels)
+        # Identify masked nodes from corrupted graph
+        if corrupted.x.dim() == 1:
+            corrupted_types = corrupted.x.long()
+        else:
+            corrupted_types = corrupted.x[:, 0].long()
 
-        # Compute accuracy
-        predicted_labels = predictions.argmax(dim=-1)
-        accuracy = (predicted_labels == target_labels).float().mean()
+        masked_nodes_mask = corrupted_types == mask_token_id
+
+        # Filter to only masked nodes
+        masked_predictions = predictions[masked_nodes_mask]
+        masked_target_labels = target_labels[masked_nodes_mask]
+
+        # If no nodes  are masked, return 0 loss
+        if masked_predictions.numel() == 0:
+            return torch.tensor(0.0, device=predictions.device), {"loss": 0.0, "accuracy": 1.0}
+
+        # Compute loss only on masked nodes
+        node_loss = F.cross_entropy(masked_predictions, masked_target_labels)
+
+        # Compute accuracy only on masked nodes
+        predicted_labels = masked_predictions.argmax(dim=-1)
+        accuracy = (predicted_labels == masked_target_labels).float().mean()
 
         metrics = {
             "loss": node_loss.item(),
