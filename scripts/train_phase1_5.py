@@ -19,7 +19,7 @@ from src.data.vocabulary import Vocabulary
 from src.models.graph_unet import IterativeGraphUNet
 from src.runtime.interpreter import MiniLispInterpreter
 from src.training.denoising_task import IterativeRefinementLoss
-from src.training.trajectory import TrajectoryGenerator, corrupt_program_curriculum
+from src.training.trajectory import TrajectoryGenerator
 from src.training.denoising_metrics import IterativeRefinementMetrics
 
 
@@ -49,6 +49,32 @@ def get_gpu_memory_stats(device: torch.device) -> dict[str, float]:
     return {"allocated_gb": 0.0, "reserved_gb": 0.0, "max_allocated_gb": 0.0}
 
 
+def get_curriculum_params(epoch: int) -> tuple[float, bool]:
+    """
+    Get corruption rate and structure preservation flag for curriculum.
+
+    Curriculum stages (from phase1.5.md):
+    - Stage 1 (0-5): 20% corruption, keep structure
+    - Stage 2 (6-15): 50% corruption, keep structure
+    - Stage 3 (16-25): 75% corruption, keep structure
+    - Stage 4 (26-40): 90% corruption, no structure
+    - Stage 5 (41+): 100% corruption (full generation)
+
+    Returns:
+        Tuple of (corruption_rate, keep_structure)
+    """
+    if epoch < 6:
+        return 0.2, True
+    elif epoch < 16:
+        return 0.5, True
+    elif epoch < 26:
+        return 0.75, True
+    elif epoch < 41:
+        return 0.9, False
+    else:
+        return 1.0, False
+
+
 def train_epoch(
     model: nn.Module,
     dataset: IterativeRefinementDataset,
@@ -75,7 +101,7 @@ def train_epoch(
         torch.cuda.reset_peak_memory_stats(device)
 
     # Determine corruption rate based on curriculum
-    corruption_rate, keep_structure = corrupt_program_curriculum(epoch)
+    corruption_rate, keep_structure = get_curriculum_params(epoch)
 
     pbar = tqdm(range(len(dataset)), desc=f"Epoch {epoch} (corruption={corruption_rate:.0%})")
     for batch_idx in pbar:
@@ -331,7 +357,7 @@ def main():
     # Create loss function
     criterion = IterativeRefinementLoss(
         vocab_size=vocab.vocab_size,
-        recon_weight=1.0,
+        reconstruction_weight=1.0,
         stability_weight=0.1,
         correction_weight=0.5,
         confidence_weight=0.2,
