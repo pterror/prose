@@ -105,15 +105,15 @@ def train_epoch(
 
     pbar = tqdm(range(len(dataset)), desc=f"Epoch {epoch} (corruption={corruption_rate:.0%})")
     for batch_idx in pbar:
-        # Get sample
-        sample = dataset[batch_idx]
-        clean_graph = sample.graph.to(device)
+        # Get sample (dataset returns tuple: corrupted, original, tests)
+        _, clean_graph, tests = dataset[batch_idx]
+        clean_graph = clean_graph.to(device)
 
         # Generate trajectory
         trajectory = trajectory_gen.generate_trajectory(
-            clean_program=clean_graph,
+            clean_graph=clean_graph,
+            tests=tests,
             corruption_rate=corruption_rate,
-            keep_structure=keep_structure,
             max_iterations=5,
         )
 
@@ -214,8 +214,9 @@ def validate_epoch(
 
     pbar = tqdm(range(len(dataset)), desc=f"Validation")
     for idx in pbar:
-        sample = dataset[idx]
-        clean_graph = sample.graph.to(device)
+        # Get sample (dataset returns tuple: corrupted, original, tests)
+        _, clean_graph, tests = dataset[idx]
+        clean_graph = clean_graph.to(device)
 
         # Corrupt at 50% for validation
         from src.training.trajectory import corrupt_program
