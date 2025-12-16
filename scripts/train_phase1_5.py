@@ -214,8 +214,13 @@ def validate_epoch(
         clean_graph = clean_graph.to(device)
 
         # Corrupt at 50% for validation
-        from src.training.trajectory import corrupt_program
-        corrupted = corrupt_program(clean_graph, corruption_rate=0.5, keep_structure=True)
+        from src.training.trajectory import corrupt_program_curriculum
+        corrupted = corrupt_program_curriculum(
+            program=clean_graph,
+            epoch=10,  # Use epoch 10 = 50% corruption
+            total_epochs=50,
+            mask_token_id=0,
+        )
 
         # Single-step prediction (use forward_full for full resolution)
         output = model.forward_full(data=corrupted, iteration=0)
