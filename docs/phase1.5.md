@@ -806,36 +806,41 @@ def generate_program(
 
 ---
 
-### 🔲 Phase D: Training Pipeline
+### ✅ Phase D: Training Pipeline (COMPLETE)
 
-**Goal:** Trajectory-based training with test feedback
+**Commit:** `6c61337` - "feat(training): implement Phase 1.5 training pipeline"
 
-#### Tasks
+#### Completed Components
 
 1. **Trajectory Generation** [`src/training/trajectory.py`](file:///home/me/git/prose/src/training/trajectory.py)
 
-   - [ ] Implement corruption strategies (20%-100%)
-   - [ ] Generate refinement trajectories
-   - [ ] Integrate test execution feedback
-   - [ ] Support curriculum learning
-   - [ ] Model-based vs random sampling (ε-greedy)
+   - ✅ TrajectoryGenerator class for simulating refinement
+   - ✅ Corruption strategies (20%-100% with structural preservation)
+   - ✅ Support for model-based and random policy (ε-greedy exploration)
+   - ✅ TrajectoryStep dataclass for training samples
+   - ✅ `corrupt_program_curriculum()` with 5-stage schedule
 
 2. **Multi-Objective Loss** [`src/training/denoising_task.py`](file:///home/me/git/prose/src/training/denoising_task.py)
 
-   - [ ] Reconstruction loss (cross-entropy)
-   - [ ] Stability loss (don't change correct nodes)
-   - [ ] Correction loss (fix incorrect nodes)
-   - [ ] Confidence calibration loss
-   - [ ] Loss weighting (1.0, 0.1, 0.5, 0.2)
+   - ✅ IterativeRefinementLoss class
+   - ✅ Reconstruction loss (standard cross-entropy)
+   - ✅ Stability loss (penalize changing correct nodes, weight=0.1)
+   - ✅ Correction loss (reward fixing incorrect, weight=0.5)
+   - ✅ Confidence calibration (BCE, weight=0.2)
+   - ✅ Comprehensive metrics tracking (11 metrics)
 
 3. **Curriculum Scheduler**
-   - [ ] Stage 1: 20% corruption (epochs 0-5)
-   - [ ] Stage 2: 50% corruption (epochs 6-15)
-   - [ ] Stage 3: 75% corruption (epochs 16-25)
-   - [ ] Stage 4: 90% corruption (epochs 26-40)
-   - [ ] Stage 5: 100% corruption (epochs 41-50)
+   - ✅ Stage 1 (epochs 0-5): 20% corruption, keep structure
+   - ✅ Stage 2 (epochs 6-15): 50% corruption, keep structure
+   - ✅ Stage 3 (epochs 16-25): 75% corruption, keep structure
+   - ✅ Stage 4 (epochs 26-40): 90% corruption, no structure
+   - ✅ Stage 5 (epochs 41-50): 100% corruption (full generation)
 
-**Estimated effort:** 4-6 hours
+**Tests:** [`tests/test_trajectory.py`](file:///home/me/git/prose/tests/test_trajectory.py)
+- ✅ 12 tests covering trajectory generation and loss
+- ✅ Corruption schedule verification
+- ✅ Loss component validation
+- ✅ All 77 tests passing (65 existing + 12 new)
 
 ---
 
