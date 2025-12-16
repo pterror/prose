@@ -126,15 +126,14 @@ def train_epoch(
             input_graph = step.input_graph.to(device)
             target_graph = step.target_graph.to(device)
 
-            # Forward pass
-            output = model(data=input_graph, iteration=step.iteration)
+            # Forward pass (use forward_full for training - no pooling)
+            output = model.forward_full(data=input_graph, iteration=step.iteration)
 
             # Compute loss
             loss, metrics = criterion(
-                predictions=output["logits"],
-                targets=target_graph.x[:, 0].long(),  # token_ids
-                current=input_graph.x[:, 0].long(),
-                confidence=output["confidence"],
+                predictions=output,
+                current_graph=input_graph,
+                target_graph=target_graph,
             )
 
             step_loss += loss
@@ -197,10 +196,12 @@ def validate_epoch(
     dataset: IterativeRefinementDataset,
     device: torch.device,
     epoch: int,
+    vocab_size: int = 95,
 ) -> dict[str, float]:
     """Validate model on dataset."""
     model.eval()
-    metrics_calculator = IterativeRefinementMetrics()
+    # Note: metrics_calculator not currently used in simple validation
+    # metrics_calculator = IterativeRefinementMetrics(vocab_size=vocab_size)
 
     total_accuracy = 0.0
     total_confidence = 0.0
@@ -216,8 +217,8 @@ def validate_epoch(
         from src.training.trajectory import corrupt_program
         corrupted = corrupt_program(clean_graph, corruption_rate=0.5, keep_structure=True)
 
-        # Single-step prediction
-        output = model(data=corrupted, iteration=0)
+        # Single-step prediction (use forward_full for full resolution)
+        output = model.forward_full(data=corrupted, iteration=0)
 
         # Compute accuracy
         predictions = output["logits"].argmax(dim=-1)
