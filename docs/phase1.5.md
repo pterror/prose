@@ -2,8 +2,9 @@
 
 **Goal:** Transform the Graph U-Net from type-only one-shot denoising to value-level iterative refinement guided by test execution.
 
-**Status:** Planning
+**Status:** 🚧 In Progress (Infrastructure ✅ Complete)
 **Target:** Bridge Phase 1 → Phase 2 (Project 2 roadmap)
+**Last Updated:** 2025-12-16
 
 ---
 
@@ -685,7 +686,212 @@ def generate_program(
 
 ---
 
-## Next Steps
+## Implementation Progress
+
+### ✅ Phase A: Infrastructure (COMPLETE)
+
+**Commit:** `c40f217` - "feat[_all]: phase 1.5 preparation"
+
+#### Completed Components
+
+1. **Vocabulary System** [`src/data/vocabulary.py`](file:///home/me/git/prose/src/data/vocabulary.py)
+
+   - ✅ Token extraction from AST
+   - ✅ Bidirectional token ↔ ID mapping
+   - ✅ Special tokens (MASK, PAD, UNK)
+   - ✅ Save/load functionality
+   - ✅ Tests: 8/8 passing
+
+2. **Mini-Lisp Interpreter** [`src/runtime/interpreter.py`](file:///home/me/git/prose/src/runtime/interpreter.py)
+
+   - ✅ Full S-expression evaluation
+   - ✅ Primitives: +, -, \*, /, <, >, =, if, let, lambda, define
+   - ✅ Lexical scoping with environments
+   - ✅ Recursion support (factorial, fibonacci tested)
+   - ✅ Execution tracing for test feedback
+   - ✅ Test execution interface
+   - ✅ Error handling (division by zero, undefined vars, type errors)
+   - ✅ Tests: 24/24 passing
+
+3. **Test Generation** [`src/data/test_generator.py`](file:///home/me/git/prose/src/data/test_generator.py)
+
+   - ✅ Automatic test case generation from programs
+   - ✅ Manual test specifications
+   - ✅ Variable extraction utilities
+
+4. **Template Extensions** [`src/data/synthetic_gen.py`](file:///home/me/git/prose/src/data/synthetic_gen.py)
+
+   - ✅ Added `tests` field to `ProgramMetadata`
+   - ✅ Added `generate_tests()` base method
+
+5. **Utilities**
+   - ✅ [`scripts/build_vocabulary.py`](file:///home/me/git/prose/scripts/build_vocabulary.py) - Build vocab from templates
+   - ✅ [`scripts/demo_phase1_5_infrastructure.py`](file:///home/me/git/prose/scripts/demo_phase1_5_infrastructure.py) - Demo all components
+
+**Verification:**
+
+- ✅ All unit tests passing (32/32 total)
+- ✅ Demo script successful (vocabulary roundtrip, interpreter recursion, execution tracing)
+- ✅ Ready for Phase B
+
+---
+
+### 🚧 Phase B: Data Representation (NEXT)
+
+**Goal:** Extend node features and dataset schema for iterative refinement
+
+#### Tasks
+
+1. **Extend ASG Node Features** [`src/data/asg_builder.py`](file:///home/me/git/prose/src/data/asg_builder.py)
+
+   - [ ] Add `token_id` field (from vocabulary)
+   - [ ] Add `prev_token_id` field (for iteration t-1)
+   - [ ] Add `iteration` field (current refinement pass)
+   - [ ] Add `test_signal` field (failure feedback)
+   - [ ] Keep `type` field for backward compatibility
+   - [ ] Update `_to_pyg_data()` to include all 6 features
+
+2. **Update Dataset Schema** [`src/data/dataset.py`](file:///home/me/git/prose/src/data/dataset.py)
+
+   - [ ] Add test cases to dataset samples
+   - [ ] Add execution trace storage
+   - [ ] Update collate function for new features
+   - [ ] Support variable-size programs in batches
+
+3. **Generate Initial Dataset with Tests**
+   - [ ] Modify data generation script to include tests
+   - [ ] Generate small pilot dataset (100 samples)
+   - [ ] Verify data loading and visualization
+
+**Estimated effort:** 1-2 hours
+
+---
+
+### 🔲 Phase C: Model Architecture
+
+**Goal:** Implement `IterativeGraphUNet` with iteration conditioning
+
+#### Tasks
+
+1. **Create Iterative Model** [`src/models/graph_unet.py`](file:///home/me/git/prose/src/models/graph_unet.py)
+
+   - [ ] Rename `GraphUNet` → `IterativeGraphUNet`
+   - [ ] Add token embedding (vocab_size → 128)
+   - [ ] Add prev_token embedding (vocab_size → 32)
+   - [ ] Add position projection (2 → 32)
+   - [ ] Add iteration embedding (max_iterations → 32)
+   - [ ] Add test_signal projection (1 → 32)
+   - [ ] Add confidence head output
+   - [ ] Update forward pass for 6-feature input
+
+2. **Test Model Forward Pass**
+   - [ ] Create unit tests for model
+   - [ ] Verify output shapes
+   - [ ] Test iteration conditioning
+
+**Estimated effort:** 2-3 hours
+
+---
+
+### 🔲 Phase D: Training Pipeline
+
+**Goal:** Trajectory-based training with test feedback
+
+#### Tasks
+
+1. **Trajectory Generation** [`src/training/trajectory.py`](file:///home/me/git/prose/src/training/trajectory.py)
+
+   - [ ] Implement corruption strategies (20%-100%)
+   - [ ] Generate refinement trajectories
+   - [ ] Integrate test execution feedback
+   - [ ] Support curriculum learning
+   - [ ] Model-based vs random sampling (ε-greedy)
+
+2. **Multi-Objective Loss** [`src/training/denoising_task.py`](file:///home/me/git/prose/src/training/denoising_task.py)
+
+   - [ ] Reconstruction loss (cross-entropy)
+   - [ ] Stability loss (don't change correct nodes)
+   - [ ] Correction loss (fix incorrect nodes)
+   - [ ] Confidence calibration loss
+   - [ ] Loss weighting (1.0, 0.1, 0.5, 0.2)
+
+3. **Curriculum Scheduler**
+   - [ ] Stage 1: 20% corruption (epochs 0-5)
+   - [ ] Stage 2: 50% corruption (epochs 6-15)
+   - [ ] Stage 3: 75% corruption (epochs 16-25)
+   - [ ] Stage 4: 90% corruption (epochs 26-40)
+   - [ ] Stage 5: 100% corruption (epochs 41-50)
+
+**Estimated effort:** 4-6 hours
+
+---
+
+### 🔲 Phase E: Inference System
+
+**Goal:** Iterative refinement loop for test-driven generation
+
+#### Tasks
+
+1. **Refinement Loop** [`src/inference/inference.py`](file:///home/me/git/prose/src/inference/inference.py)
+   - [ ] Initialize with fully masked graph
+   - [ ] Iterative refinement (max 10 iterations)
+   - [ ] Test execution and feedback
+   - [ ] Early stopping (tests pass OR high confidence)
+   - [ ] Update graph with predictions + test signals
+
+**Estimated effort:** 1-2 hours
+
+---
+
+### 🔲 Phase F: Evaluation & Visualization
+
+**Goal:** Comprehensive metrics and trajectory visualization
+
+#### Tasks
+
+1. **Extend Metrics** [`src/eval/denoising_metrics.py`](file:///home/me/git/prose/src/eval/denoising_metrics.py)
+
+   - [ ] Test pass rate metric
+   - [ ] Iteration convergence tracking
+   - [ ] Confidence calibration (ECE)
+   - [ ] Per-iteration accuracy
+
+2. **Trajectory Visualization** [`scripts/visualize.py`](file:///home/me/git/prose/scripts/visualize.py)
+   - [ ] Show iteration progression (0 → T)
+   - [ ] Highlight changed nodes
+   - [ ] Display test signals
+   - [ ] Show confidence evolution
+
+**Estimated effort:** 2-3 hours
+
+---
+
+## Next Session Tasks
+
+**Priority 1: Data Representation (Phase B)**
+Start here in the next session:
+
+1. Update `asg_builder.py` to add 6-feature node representation
+2. Modify dataset to include test cases
+3. Generate small pilot dataset (100 samples with tests)
+4. Verify data loading
+
+**Priority 2: Model Architecture (Phase C)**
+Once data is ready:
+
+1. Implement `IterativeGraphUNet`
+2. Test forward pass
+3. Run smoke test (1 epoch)
+
+**Reference Files:**
+
+- Implementation plan: [`implementation_plan.md`](file:///home/me/.gemini/antigravity/brain/30bb95f6-82bf-4bef-b0b5-ceb6a978a3ca/implementation_plan.md)
+- Task checklist: [`task.md`](file:///home/me/.gemini/antigravity/brain/30bb95f6-82bf-4bef-b0b5-ceb6a978a3ca/task.md)
+- Infrastructure walkthrough: [`walkthrough.md`](file:///home/me/.gemini/antigravity/brain/30bb95f6-82bf-4bef-b0b5-ceb6a978a3ca/walkthrough.md)
+
+---
+
+## Next Steps (Original)
 
 1. **Review this plan** - Identify any gaps or concerns
 2. **Implement Step 1** (Infrastructure) - Start with interpreter + vocabulary
