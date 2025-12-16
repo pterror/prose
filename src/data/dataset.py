@@ -78,8 +78,14 @@ class DenoisingGraphDataset(Dataset):
 
         corrupt_indices = self.rng.sample(range(num_nodes), num_corrupt)
 
-        # Mask selected nodes
+        # Mask selected nodes (only corrupt node type, keep position features)
         for idx in corrupt_indices:
-            corrupted.x[idx] = self.mask_token_id
+            # Defensive check
+            if corrupted.x.dim() == 1:
+                # Fallback: if 1D, just set the value directly
+                corrupted.x[idx] = self.mask_token_id
+            else:
+                # 2D case: only mask first column (node type)
+                corrupted.x[idx, 0] = self.mask_token_id
 
         return corrupted

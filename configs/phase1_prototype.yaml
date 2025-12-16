@@ -22,7 +22,7 @@ data:
   train_dir: data/processed/train
   val_dir: data/processed/val
   test_dir: data/processed/test
-  num_workers: 4
+  num_workers: 0 # Set to 0 to avoid multiprocessing issues
   corruption_rate: 0.2
   mask_token_id: 8
 

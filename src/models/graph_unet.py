@@ -192,8 +192,18 @@ class GraphUNet(nn.Module):
         # Just run encoder-bottleneck-decoder at full resolution
 
         # Split and process node features (same as forward)
-        node_types = data.x[:, 0]
-        position_features = data.x[:, 1:].float()
+        # Handle both corrupted (1D) and uncorrupted (2D) data
+        if data.x.dim() == 1:
+            # Corrupted data: just node types, no position features
+            node_types = data.x
+            # Create dummy position features (zeros)
+            position_features = torch.zeros(
+                data.x.size(0), 2, device=data.x.device, dtype=torch.float32
+            )
+        else:
+            # Uncorrupted data: [node_type, depth, sibling_index]
+            node_types = data.x[:, 0]
+            position_features = data.x[:, 1:].float()
 
         node_emb = self.node_embedding(node_types)
         pos_norm = self.position_norm(position_features)

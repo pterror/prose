@@ -22,14 +22,19 @@ class DenoisingLoss(nn.Module):
 
         Args:
             predictions: Predicted node type logits [num_nodes, num_node_types]
-            targets: Original graph Data object
+            targets: Original graph Data object with x[:, 0] = node types
             mask_token_id: ID of mask token (nodes to predict)
 
         Returns:
             (loss, metrics_dict) tuple
         """
-        # Cross-entropy loss on node types
-        target_labels = targets.x
+        # Extract node type IDs from first column of node features
+        # targets.x shape: [num_nodes, 3] where columns are [node_type, depth, sibling_index]
+        # OR [num_nodes] if corrupted (1D)
+        if targets.x.dim() == 1:
+            target_labels = targets.x.long()
+        else:
+            target_labels = targets.x[:, 0].long()
 
         # Only compute loss on masked nodes (optional, for now use all)
         node_loss = F.cross_entropy(predictions, target_labels)
