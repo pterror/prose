@@ -127,13 +127,7 @@ def train_epoch(
             target_graph = step.target_graph.to(device)
 
             # Forward pass
-            output = model(
-                x=input_graph.x,
-                edge_index=input_graph.edge_index,
-                edge_type=input_graph.edge_type,
-                batch=None,
-                iteration=step.iteration,
-            )
+            output = model(data=input_graph, iteration=step.iteration)
 
             # Compute loss
             loss, metrics = criterion(
@@ -223,13 +217,7 @@ def validate_epoch(
         corrupted = corrupt_program(clean_graph, corruption_rate=0.5, keep_structure=True)
 
         # Single-step prediction
-        output = model(
-            x=corrupted.x,
-            edge_index=corrupted.edge_index,
-            edge_type=corrupted.edge_type,
-            batch=None,
-            iteration=0,
-        )
+        output = model(data=corrupted, iteration=0)
 
         # Compute accuracy
         predictions = output["logits"].argmax(dim=-1)
