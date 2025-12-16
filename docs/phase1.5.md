@@ -767,29 +767,42 @@ def generate_program(
 
 ---
 
-### 🔲 Phase C: Model Architecture
+### ✅ Phase C: Model Architecture (COMPLETE)
 
-**Goal:** Implement `IterativeGraphUNet` with iteration conditioning
+**Commit:** `bd8f473` - "feat(model): implement IterativeGraphUNet for Phase 1.5"
 
-#### Tasks
+#### Completed Components
 
-1. **Create Iterative Model** [`src/models/graph_unet.py`](file:///home/me/git/prose/src/models/graph_unet.py)
+1. **IterativeGraphUNet** [`src/models/graph_unet.py`](file:///home/me/git/prose/src/models/graph_unet.py)
 
-   - [ ] Rename `GraphUNet` → `IterativeGraphUNet`
-   - [ ] Add token embedding (vocab_size → 128)
-   - [ ] Add prev_token embedding (vocab_size → 32)
-   - [ ] Add position projection (2 → 32)
-   - [ ] Add iteration embedding (max_iterations → 32)
-   - [ ] Add test_signal projection (1 → 32)
-   - [ ] Add confidence head output
-   - [ ] Update forward pass for 6-feature input
+   - ✅ Implemented alongside legacy GraphUNet (backward compatible)
+   - ✅ Token embedding (vocab_size → 128)
+   - ✅ Prev token embedding (vocab_size → 32)
+   - ✅ Position projection (2 → 32)
+   - ✅ Iteration embedding (max_iterations → 32)
+   - ✅ Test signal projection (1 → 32)
+   - ✅ Confidence head output (sigmoid activation)
+   - ✅ forward() with pooling and forward_full() without pooling
 
-2. **Test Model Forward Pass**
-   - [ ] Create unit tests for model
-   - [ ] Verify output shapes
-   - [ ] Test iteration conditioning
+2. **Unit Tests** [`tests/test_iterative_model.py`](file:///home/me/git/prose/tests/test_iterative_model.py)
+   - ✅ 10 tests covering all functionality
+   - ✅ Output shape verification
+   - ✅ Confidence range validation
+   - ✅ Iteration conditioning
+   - ✅ Test signal influence
+   - ✅ Batch processing
+   - ✅ Gradient flow
+   - ✅ Edge cases (single node, large vocab)
 
-**Estimated effort:** 2-3 hours
+**Architecture Summary:**
+- Input: 256D (128 + 32 + 32 + 32 + 32)
+- Parameters: ~702K (vocab=95, hidden=256, depth=3)
+- Output: Logits [num_nodes, vocab_size] + Confidence [num_nodes, 1]
+
+**Verification:**
+- ✅ All 10 unit tests passing
+- ✅ Tested with real Phase 1.5 data (pilot dataset)
+- ✅ Gradients flow correctly
 
 ---
 
