@@ -21,6 +21,7 @@ from src.runtime.interpreter import MiniLispInterpreter
 from src.training.denoising_task import IterativeRefinementLoss
 from src.training.trajectory import TrajectoryGenerator
 from src.training.denoising_metrics import IterativeRefinementMetrics
+from src.training.curriculum import MixedCurriculumScheduler
 
 
 def set_seed(seed: int) -> None:
@@ -100,14 +101,25 @@ def train_epoch(
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
 
-    # Determine corruption rate based on curriculum
-    corruption_rate, keep_structure = get_curriculum_params(epoch)
+    # Create curriculum scheduler if not exists (will use mixed rates per sample)
+    if not hasattr(train_epoch, '_curriculum'):
+        train_epoch._curriculum = MixedCurriculumScheduler(mix_ratio=0.3)
 
-    pbar = tqdm(range(len(dataset)), desc=f"Epoch {epoch} (corruption={corruption_rate:.0%})")
+    curriculum = train_epoch._curriculum
+
+    # Get stage info for progress bar
+    stage_info = curriculum.get_current_stage_info(epoch)
+    primary_rate = stage_info['primary_rate']
+
+    pbar = tqdm(range(len(dataset)), desc=f"Epoch {epoch} (primary={primary_rate:.0%}, mixed)")
     for batch_idx in pbar:
         # Get sample (dataset returns tuple: corrupted, original, tests)
         _, clean_graph, tests = dataset[batch_idx]
         clean_graph = clean_graph.to(device)
+
+        # Sample corruption rate from mixed curriculum
+        corruption_rates = curriculum.get_corruption_rate(epoch, batch_idx, batch_size=1)
+        corruption_rate = corruption_rates[0]
 
         # Generate trajectory
         trajectory = trajectory_gen.generate_trajectory(
