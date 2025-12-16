@@ -46,8 +46,17 @@ class GraphUNet(nn.Module):
         self.depth = depth
         self.num_node_types = num_node_types
 
-        # Node type embedding
+        # Node type embedding (for categorical node types)
         self.node_embedding = nn.Embedding(num_node_types, in_channels)
+
+        # Position encoding: Linear layer to project [depth, sibling_index] to same dim as node embedding
+        # We'll concatenate normalized position features with node type embedding
+        # Total input to graph layers: in_channels (node embedding) + 2 (position features)
+        self.position_norm = nn.LayerNorm(2)  # Normalize position features
+        self.position_projection = nn.Linear(2, in_channels // 4)  # Project to smaller dim
+
+        # Adjust effective input channels for graph layers
+        self.effective_in_channels = in_channels + in_channels // 4
 
         # Edge type embedding (3 types: Child, Sibling, DataFlow)
         self.edge_embedding = nn.Embedding(3, in_channels)
@@ -56,7 +65,7 @@ class GraphUNet(nn.Module):
         self.encoder_layers = nn.ModuleList()
         self.pool_layers = nn.ModuleList()
 
-        current_channels = in_channels
+        current_channels = self.effective_in_channels
         for i in range(depth):
             # Graph convolution layer
             if layer_type == "GAT":
@@ -109,13 +118,25 @@ class GraphUNet(nn.Module):
         Forward pass through Graph U-Net.
 
         Args:
-            data: PyG Data object with x (node types), edge_index, edge_attr
+            data: PyG Data object with x [num_nodes, 3] = [node_type, depth, sibling_index]
 
         Returns:
             Reconstructed node type logits [num_nodes, num_node_types]
         """
+        # Split node features into node_type and position features
+        node_types = data.x[:, 0]  # [num_nodes]
+        position_features = data.x[:, 1:].float()  # [num_nodes, 2] (depth, sibling_index)
+
         # Embed node types
-        x = self.node_embedding(data.x)
+        node_emb = self.node_embedding(node_types)  # [num_nodes, in_channels]
+
+        # Process position features
+        pos_norm = self.position_norm(position_features)  # [num_nodes, 2]
+        pos_emb = self.position_projection(pos_norm)  # [num_nodes, in_channels // 4]
+
+        # Concatenate node type embedding with position encoding
+        x = torch.cat([node_emb, pos_emb], dim=-1)  # [num_nodes, effective_in_channels]
+
         edge_index = data.edge_index
         batch = data.batch if hasattr(data, "batch") else None
 
@@ -162,14 +183,23 @@ class GraphUNet(nn.Module):
         graph structure using the pooling indices.
 
         Args:
-            data: PyG Data object
+            data: PyG Data object with x [num_nodes, 3]
 
         Returns:
             Node type predictions for ALL original nodes
         """
         # For Phase 1, we'll use a simpler approach:
         # Just run encoder-bottleneck-decoder at full resolution
-        x = self.node_embedding(data.x)
+
+        # Split and process node features (same as forward)
+        node_types = data.x[:, 0]
+        position_features = data.x[:, 1:].float()
+
+        node_emb = self.node_embedding(node_types)
+        pos_norm = self.position_norm(position_features)
+        pos_emb = self.position_projection(pos_norm)
+        x = torch.cat([node_emb, pos_emb], dim=-1)
+
         edge_index = data.edge_index
 
         # Single-level encoding

@@ -74,9 +74,17 @@ class ASGBuilder:
         # Convert to PyG format
         return self._to_pyg_data()
 
-    def _add_tree_edges(self, node: ASTNode, parent_id: int | None) -> int:
+    def _add_tree_edges(
+        self, node: ASTNode, parent_id: int | None, depth: int = 0, sibling_index: int = 0
+    ) -> int:
         """
         Recursively add nodes and Child/Sibling edges.
+
+        Args:
+            node: AST node to process
+            parent_id: Parent node ID (None for root)
+            depth: Depth in the tree (0 for root)
+            sibling_index: Position among siblings (0-indexed)
 
         Returns:
             Node ID of the added node
@@ -84,11 +92,13 @@ class ASGBuilder:
         node_id = self.node_counter
         self.node_counter += 1
 
-        # Add node with features
+        # Add node with features (including position encodings)
         self.graph.add_node(
             node_id,
             node_type=node.node_type.value,
             value=node.value,
+            depth=depth,
+            sibling_index=sibling_index,
         )
 
         # Add Child edge from parent
@@ -102,10 +112,12 @@ class ASGBuilder:
                     self.symbol_table[node.value] = []
                 self.symbol_table[node.value].append(node_id)
 
-        # Process children
+        # Process children (increment depth, track sibling index)
         prev_child_id = None
-        for child in node.children or []:
-            child_id = self._add_tree_edges(child, parent_id=node_id)
+        for child_idx, child in enumerate(node.children or []):
+            child_id = self._add_tree_edges(
+                child, parent_id=node_id, depth=depth + 1, sibling_index=child_idx
+            )
 
             # Add Sibling edge between consecutive children
             if prev_child_id is not None:
@@ -141,19 +153,26 @@ class ASGBuilder:
         """Convert NetworkX graph to PyTorch Geometric Data object."""
         num_nodes = len(self.graph.nodes())
 
-        # Create node feature matrix (node_type as one-hot)
-        node_types = [self.graph.nodes[i]["node_type"] for i in range(num_nodes)]
-        x = torch.tensor(node_types, dtype=torch.long)
+        # Create node feature matrix with position encodings
+        # Shape: [num_nodes, 3] where columns are [node_type, depth, sibling_index]
+        node_features = []
+        for i in range(num_nodes):
+            node_data = self.graph.nodes[i]
+            node_features.append(
+                [
+                    node_data["node_type"],
+                    node_data["depth"],
+                    node_data["sibling_index"],
+                ]
+            )
+
+        x = torch.tensor(node_features, dtype=torch.long)
 
         # Create edge index and edge attributes
         edge_list = list(self.graph.edges(data=True))
         if edge_list:
-            edge_index = torch.tensor(
-                [[e[0], e[1]] for e in edge_list], dtype=torch.long
-            ).t()
-            edge_attr = torch.tensor(
-                [e[2]["edge_type"] for e in edge_list], dtype=torch.long
-            )
+            edge_index = torch.tensor([[e[0], e[1]] for e in edge_list], dtype=torch.long).t()
+            edge_attr = torch.tensor([e[2]["edge_type"] for e in edge_list], dtype=torch.long)
         else:
             edge_index = torch.empty((2, 0), dtype=torch.long)
             edge_attr = torch.empty((0,), dtype=torch.long)

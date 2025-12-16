@@ -43,8 +43,7 @@ cache/
 *.cpuprofile
 
 # generated data
-data/processed/
-data/processed_old_backup/
+data/
 
 # compile cache
 __pycache__/

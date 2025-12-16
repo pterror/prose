@@ -25,9 +25,11 @@
 
 **🎯 Priority Actions:**
 
-- [ ] **Fix CUDA setup** - Verify GPU drivers and PyTorch CUDA availability
+- [x] **Fix CUDA setup** - Verify GPU drivers and PyTorch CUDA availability
+- [x] **Add position encodings (depth in tree, sibling index)** ✅ **COMPLETE** - Implemented and tested
+- [ ] **Regenerate datasets** with position encodings (2K train, 500 val, 500 test)
+- [ ] **Retrain model** (50 epochs) to validate position encoding impact
 - [ ] **Expand templates** - Add more diverse Mini-Lisp programs to reduce positional bias
-- [ ] **Add position encodings** - Help model distinguish positional vs semantic patterns
 - [ ] **Increase model depth** - Try 5-7 layers instead of 3 for better context propagation
 
 #### Evaluation
@@ -51,7 +53,11 @@
 #### Model Improvements
 
 - [ ] Implement proper unpooling (restore full graph topology)
-- [/] **Add position encodings (depth in tree, sibling index)** 👈 High priority to fix positional overfitting
+- [x] **Add position encodings (depth in tree, sibling index)** ✅ **COMPLETE**
+  - ✅ Modified ASG builder to calculate depth and sibling_index
+  - ✅ Updated model to process 3D node features [node_type, depth, sibling_index]
+  - ✅ Created comprehensive unit tests (23/23 tests pass)
+  - ⏭️ **Next:** Regenerate datasets and retrain to measure impact
 - [ ] **Increase model depth** from 3 to 5-7 layers for better context propagation
 - [ ] **Add focal loss** for OPERATOR vs SYMBOL to address confusion
 - [ ] Experiment with edge-aware attention (different weights for Child/Sibling/DataFlow)
