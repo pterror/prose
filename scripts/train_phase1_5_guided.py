@@ -111,12 +111,15 @@ def train_epoch(
             input_graph = step.input_graph.to(device)
             target_graph = step.target_graph.to(device)
 
-            # Move test feedback to device
-            test_feedback = {
-                'test_ids': step.test_feedback['test_ids'].to(device),
-                'test_statuses': step.test_feedback['test_statuses'].to(device),
-                'test_traces': step.test_feedback['test_traces'].to(device),
-            }
+            # Move test feedback to device (handle None for iteration 0)
+            if step.test_feedback is not None:
+                test_feedback = {
+                    'test_ids': step.test_feedback['test_ids'].to(device),
+                    'test_statuses': step.test_feedback['test_statuses'].to(device),
+                    'test_traces': step.test_feedback['test_traces'].to(device),
+                }
+            else:
+                test_feedback = None  # No test feedback at iteration 0
 
             # Forward pass with test feedback guidance
             output = model.forward_full(

@@ -213,3 +213,61 @@ The cross-attention model was trained with test feedback at every iteration (inc
 **Status:** Root cause identified. Cross-attention dependency during training causes one-shot degradation.
 
 ---
+
+## Experiment 3c: Corrected Training (No Test Feedback at Iteration 0)
+**Date:** 2025-12-17
+**Hypothesis:** Training with `test_feedback=None` at iteration 0 will fix one-shot dependency while preserving iterative refinement capability.
+
+**Changes:**
+- Modified `GuidedTrajectoryGenerator` to skip test feedback at iteration 0
+- Model must learn one-shot prediction without test signals
+- Test feedback only provided at iterations 1+ for refinement
+
+**Configuration:**
+- Same as Experiment 3, but trajectory generator modified
+- Training: 50 epochs, curriculum, scheduled sampling
+- Model: 2,030,080 parameters (with cross-attention)
+
+**Results:**
+- **Best validation accuracy**: 61.6% (epoch 41)
+- **One-shot at 20%**: 63.3% (+7.6% vs Experiment 3!)
+- **One-shot at 50%**: 55.3% (+8.4% vs Experiment 3!)
+- **One-shot at 75%**: 46.2% (+4.3% vs Experiment 3!)
+
+**Iterative Refinement Results:**
+
+| Corruption | One-shot | Final | Improvement |
+|------------|----------|-------|-------------|
+| 20%        | 63.3%    | 57.1% | **-6.2%** ❌ |
+| 50%        | 55.3%    | 51.6% | **-3.7%** ❌ |
+| 75%        | 46.2%    | 49.6% | **+3.4%** ✅ |
+
+**Full Comparison:**
+
+| Experiment | Architecture | One-shot @ 20% | Iterative @ 20% | One-shot @ 50% | Iterative @ 50% |
+|------------|--------------|----------------|-----------------|----------------|-----------------|
+| Exp 1 | 6 feat + test_signal | **73.4%** | +1.9% | **57.7%** | +1.9% |
+| Exp 3b | 5 feat, no cross-attn | 63.1% | N/A | 52.7% | N/A |
+| Exp 3 | 5 feat + cross-attn (bad) | 55.7% | +1.3% | 46.9% | +0.1% |
+| Exp 3c | 5 feat + cross-attn (fixed) | 63.3% | **-6.2%** | 55.3% | **-3.7%** |
+
+**Conclusions:**
+- ✅ **One-shot dependency FIXED**: 63.3% matches baseline without cross-attention (63.1%)
+- ✅ **Corrected training worked**: +7.6% improvement over Experiment 3
+- ❌ **Iterative refinement BROKEN**: Model makes things worse at iterations 1+ (except at 75% corruption)
+- ⚠️ **Feature reduction still costly**: 63.3% vs 73.4% baseline (-10.1% from removing test_signal)
+
+**Root Cause Analysis:**
+The model learned to predict well at iteration 0 (without test feedback), but when given test feedback in later iterations, it's not using it effectively and actually makes things worse. Possible explanations:
+
+1. **Insufficient training signal**: Model rarely sees refinement iterations during training (most trajectories converge early)
+2. **Test feedback misleading**: At low corruption (20%), most tests pass, so test feedback provides little useful signal
+3. **Model uncertainty**: When most tokens are correct, model "second-guesses" itself with test feedback
+4. **Cross-attention interference**: Model learned strong one-shot capability, cross-attention interferes rather than helps
+
+**Key Insight:**
+At low corruption, the model's one-shot prediction is already quite good (63.3%), and the sparse test feedback (few failures) may be misleading rather than helpful. At high corruption (75%), test feedback is dense and useful (+3.4%).
+
+**Status:** One-shot fixed but iterative refinement fails. Need different approach for effective refinement.
+
+---

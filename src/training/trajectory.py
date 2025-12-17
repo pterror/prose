@@ -353,7 +353,11 @@ class GuidedTrajectoryGenerator:
         # 2. Simulate refinement iterations
         for iteration in range(max_iterations):
             # Compute test feedback (format for cross-attention)
-            test_feedback = self._compute_test_feedback(current_graph, tests)
+            # IMPORTANT: Skip test feedback at iteration 0 to avoid dependency during one-shot prediction
+            if iteration == 0:
+                test_feedback = None  # No test feedback for one-shot (iteration 0)
+            else:
+                test_feedback = self._compute_test_feedback(current_graph, tests)
 
             # Store trajectory step
             trajectory.append(GuidedTrajectoryStep(
@@ -379,13 +383,16 @@ class GuidedTrajectoryGenerator:
                     # Update iteration feature
                     current_graph.x[:, 4] = iteration
 
-                    # Move test feedback to same device as model
+                    # Move test feedback to same device as model (if present)
                     device = next(model.parameters()).device
-                    test_feedback_device = {
-                        'test_ids': test_feedback['test_ids'].to(device),
-                        'test_statuses': test_feedback['test_statuses'].to(device),
-                        'test_traces': test_feedback['test_traces'].to(device),
-                    }
+                    if test_feedback is not None:
+                        test_feedback_device = {
+                            'test_ids': test_feedback['test_ids'].to(device),
+                            'test_statuses': test_feedback['test_statuses'].to(device),
+                            'test_traces': test_feedback['test_traces'].to(device),
+                        }
+                    else:
+                        test_feedback_device = None  # No test feedback at iteration 0
 
                     output = model.forward_full(
                         current_graph,
