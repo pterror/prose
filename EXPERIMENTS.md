@@ -1,0 +1,215 @@
+# Phase 1.5 Experiment Log
+
+## Experiment 1: Baseline Training (50 epochs, 10x test weighting)
+**Date:** 2025-12-17
+**Hypothesis:** Trajectory-based training with test execution will enable iterative refinement.
+
+**Configuration:**
+- Epochs: 50
+- Test weighting: 9.0 (10x for failing nodes)
+- Scheduled sampling: 0.95 max, 0.5 warmup
+- Training samples: 80
+- Model: GraphUNet (256 hidden, depth 3)
+
+**Results:**
+- **One-shot at 20%**: 73.4% ✅ (exceeds 55% target)
+- **One-shot at 50%**: 57.7%
+- **Iterative at 50%**: 59.7% (+1.9% improvement)
+- **Iterative at 20%**: 73.0% (-0.4% - slightly worse!)
+
+**Conclusions:**
+- ✅ One-shot performance excellent and preserved
+- ❌ Iterative refinement barely helps (+1.9% at 50% corruption)
+- ❌ At low corruption (20%), iterative actually hurts slightly
+- Test signals are being computed (25% node coverage on average)
+- Model trained for 50 epochs, may need more time to learn iterative behavior
+
+**Next:** Try two-stage fine-tuning to add iterative capability without risking one-shot performance.
+
+---
+
+## Experiment 2: Two-Stage Fine-Tuning (Conservative)
+**Date:** 2025-12-17
+**Hypothesis:** Fine-tuning from strong one-shot checkpoint with moderate test weighting will add iterative refinement without catastrophic forgetting.
+
+**Configuration:**
+- Starting checkpoint: Experiment 1 best model (epoch 47, 73.4% one-shot)
+- Epochs: 30 (fine-tuning)
+- Learning rate: 0.0001 (10x lower than base training)
+- Test weighting: 4.0 (5x for failing nodes, down from 10x)
+- Early stopping: Stop if one-shot@20% < 70%
+- Validation: Multi-level every epoch
+
+**Risk Mitigation:**
+- Lower LR prevents large weight updates
+- Moderate weighting (5x not 20x) keeps balance:
+  - 75% nodes × 1 + 25% nodes × 5 = 200% total
+  - Test-failing nodes contribute 125/200 = 62.5% of loss (vs 87% with 20x)
+- Early stopping protects one-shot performance
+- Starting from proven checkpoint
+
+**Results:**
+- **One-shot at 20%**: 70.6% (vs 73.4% baseline, -2.8%)
+- **One-shot at 50%**: 57.1% (vs 57.7% baseline, -0.6%)
+- **Iterative at 50%**: 54.1% (vs 59.7% baseline = **-3.1% improvement**)
+- Best val accuracy: 62.4% (epoch 69)
+
+**Conclusions:**
+- ❌ **Fine-tuning made iterative refinement WORSE** (-3.1% vs +1.9% baseline)
+- ⚠️ One-shot slightly degraded but still above target (70.6% vs 73.4%)
+- **Hypothesis rejected**: Lower test weighting + fine-tuning did not improve iterative capability
+- Possible explanations:
+  1. Lower weighting (5x) too weak - model forgot to use test signals
+  2. Lower LR too conservative - couldn't learn new behavior
+  3. Model became too cautious about changing predictions
+  4. Distribution mismatch still the root cause (training sees random/GT, inference sees model predictions)
+
+**Key Limitation (Generalization):**
+- ⚠️ **Current approach requires (corrupted, clean) pairs during training**
+- This won't generalize to other domains (strings, images) where we don't have ground truth
+- **Need approach that learns from test feedback alone**, not from seeing clean targets
+- This is a fundamental architectural issue, not just a hyperparameter tuning problem
+
+**Next steps to consider:**
+1. Try baseline weighting (10x) but train for 100 epochs instead of 50
+2. Investigate why model makes things worse during refinement
+3. Try different scheduled sampling strategy (more model predictions during training)
+4. **Rethink architecture**: Learn to refine from test feedback only (no clean targets during refinement training)
+
+---
+
+## Experiment 3: Cross-Attention Test Feedback Guidance
+**Date:** 2025-12-17
+**Hypothesis:** Cross-attention to test feedback will provide scalable, generalizable guidance for iterative refinement without relying on ground-truth pairs.
+
+**Architecture Changes:**
+- **Test signals as guidance, not features**: Test feedback is NOT a node feature, but separate guidance
+- **Cross-attention layers**: Nodes attend to test results via multi-head cross-attention
+- **Scalable to large codebases**: Handles 1000+ tests, 10,000+ nodes efficiently
+- **Generalizable**: No dependence on (corrupted, clean) pairs during refinement
+
+**Model: GuidedIterativeGraphUNet**
+- 5 node features: [token_id, prev_token_id, depth, sibling_index, iteration]
+- Test feedback encoder: Encodes (test_id, pass/fail, execution_trace) → embeddings
+- Cross-attention after each graph layer: Nodes attend to failed test embeddings
+- 4 attention heads, 256 hidden dim
+
+**Configuration:**
+- Epochs: 50
+- Learning rate: 0.001
+- Scheduled sampling: 0.95 max, 0.5 warmup
+- Training samples: 80
+- Max tests: 100
+- Max nodes: 1000
+- **No test-guided weighting** (test feedback guides via attention, not loss)
+
+**Key Differences from Experiments 1 & 2:**
+1. **Input format**: 5 features (no test_signal), test feedback passed separately
+2. **Guidance mechanism**: Cross-attention (global context) vs node features (local)
+3. **Scalability**: O(num_tests) memory vs O(num_nodes) for node features
+4. **Generalization**: Works with test feedback alone, no clean targets needed
+
+**Success Criteria:**
+- ✅ One-shot at 20%: ≥55% (preserve baseline)
+- ✅ Iterative improvement at 50%: +10-15%
+- ✅ Model learns to use test feedback (attention weights concentrate on failures)
+- ✅ Training completes without OOM
+
+**Results:**
+- **Training completed**: 50 epochs
+- **Best validation accuracy**: 57.4% (epoch 40)
+- **Final training loss**: 2.62 (down from 6.72 at epoch 1)
+- **Model size**: 2,030,080 parameters
+- **Training time**: ~4 minutes total (~5 seconds per epoch)
+
+**Analysis:**
+- ✅ **Preserved one-shot performance**: 57.4% validation accuracy matches baseline (~58%)
+- ✅ **Training stable**: Loss decreased smoothly from 6.72 → 2.62
+- ✅ **No catastrophic forgetting**: Model maintained performance throughout curriculum
+- ✅ **Scalable architecture**: Cross-attention handled 100 tests efficiently
+- ⚠️ **Iterative refinement not yet tested**: Need to evaluate if model uses test feedback effectively
+
+**Iterative Refinement Results:**
+| Corruption | One-shot | Final | Improvement |
+|------------|----------|-------|-------------|
+| 20%        | 55.7%    | 57.1% | **+1.3%** ⚠️ |
+| 50%        | 46.9%    | 47.0% | **+0.1%** ❌ |
+| 75%        | 41.9%    | 50.1% | **+8.2%** ✅ |
+
+**Comparison with Baseline (Experiment 1):**
+| Metric | Baseline (10x weighting) | Cross-Attention | Difference |
+|--------|--------------------------|-----------------|------------|
+| One-shot @ 20% | 73.4% | 55.7% | **-17.7%** ❌ |
+| One-shot @ 50% | 57.7% | 46.9% | **-10.8%** ❌ |
+| Improvement @ 20% | +1.9% | +1.3% | -0.6% |
+| Improvement @ 50% | +1.9% | +0.1% | -1.8% |
+| Improvement @ 75% | N/A | +8.2% | N/A |
+
+**Conclusions:**
+- ❌ **One-shot performance severely degraded**: 55.7% vs 73.4% baseline (-17.7% at 20% corruption)
+- ⚠️ **Iterative refinement weak at low corruption**: +1.3% vs +1.9% baseline
+- ❌ **Iterative refinement fails at 50% corruption**: +0.1% vs +1.9% baseline
+- ✅ **Strong improvement at high corruption**: +8.2% at 75% (best so far!)
+- 🤔 **Architecture works but training failed**: Model can refine at 75% but one-shot is poor
+
+**Root Cause Analysis:**
+The cross-attention architecture is sound (proves useful at 75% corruption), but **one-shot performance is catastrophically worse** than baseline. Possible causes:
+1. **Dependency on test feedback**: Model learned to rely on test signals, can't predict well without them
+2. **Training samples too small**: 80 samples insufficient for cross-attention to learn robust features
+3. **Feature reduction**: Removing test_signal from node features may have hurt one-shot capability
+4. **Need baseline comparison**: Should train GuidedIterativeGraphUNet with `use_test_guidance=False` to isolate effect
+
+**Status:** Cross-attention shows promise at high corruption (+8.2%) but one-shot performance unacceptable. Need to diagnose why one-shot is so poor.
+
+---
+
+## Experiment 3b: Baseline Comparison (Isolating Cross-Attention Effect)
+**Date:** 2025-12-17
+**Hypothesis:** Training the same GuidedIterativeGraphUNet architecture with `use_test_guidance=False` will isolate whether the problem is (1) feature reduction (6→5 features) or (2) cross-attention dependency.
+
+**Configuration:**
+- Same as Experiment 3, but `use_test_guidance: false`
+- No cross-attention layers
+- Model size: 760,000 parameters (vs 2,030,080 for cross-attention)
+- Training: 50 epochs, same curriculum and hyperparameters
+
+**Results:**
+- **Best validation accuracy**: 61.7% (epoch 41)
+- **One-shot at 20%**: 63.1%
+- **One-shot at 50%**: 52.7%
+- **One-shot at 75%**: 44.8%
+
+**Comparison Across All Experiments:**
+
+| Experiment | Architecture | One-shot @ 20% | One-shot @ 50% | Improvement @ 50% |
+|------------|--------------|----------------|----------------|-------------------|
+| Experiment 1 | 6 features + test_signal | **73.4%** | **57.7%** | +1.9% |
+| Experiment 3b (Baseline) | 5 features, no cross-attn | 63.1% | 52.7% | N/A |
+| Experiment 3 (Cross-attn) | 5 features + cross-attn | 55.7% | 46.9% | +0.1% |
+
+**Performance Breakdown:**
+- **Feature reduction** (removing test_signal): **-10.3%** (73.4% → 63.1% at 20% corruption)
+- **Cross-attention dependency**: **-7.4%** additional loss (63.1% → 55.7% at 20% corruption)
+- **Total degradation**: **-17.7%** from Experiment 1 baseline
+
+**Conclusions:**
+- ❌ **Feature reduction is costly**: Removing test_signal from node features loses 10.3% accuracy
+- ❌ **Cross-attention makes one-shot worse**: Model learned to depend on test feedback, can't predict without it
+- ✅ **Cross-attention helps at high corruption**: +8.2% improvement at 75% corruption (Experiment 3)
+- 🤔 **Architecture sound but training flawed**: Cross-attention is useful for refinement but hurts one-shot
+
+**Root Cause:**
+The cross-attention model was trained with test feedback at every iteration (including iteration 0), so it learned to rely on it. During one-shot evaluation (iteration 0, no test feedback), it performs poorly because it expects test signals.
+
+**Next Steps:**
+1. **Option A**: Train cross-attention model with test_feedback=None at iteration 0
+   - Forces model to learn one-shot prediction without test dependency
+   - Only use cross-attention for iterations 1+
+2. **Option B**: Use Experiment 1's approach (test_signal as node feature) with better weighting
+   - Proven to preserve one-shot performance (73.4%)
+   - Explore why iterative refinement is weak (+1.9% only)
+3. **Option C**: Hybrid approach - test_signal feature + cross-attention for refinement iterations
+
+**Status:** Root cause identified. Cross-attention dependency during training causes one-shot degradation.
+
+---

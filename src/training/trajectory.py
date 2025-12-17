@@ -31,6 +31,8 @@ class TrajectoryGenerator:
         builder: ASGBuilder,
         interpreter: MiniLispInterpreter,
         mask_token_id: int = 0,
+        scheduled_sampling_max: float = 0.95,
+        scheduled_sampling_warmup: float = 0.5,
     ):
         """
         Initialize trajectory generator.
@@ -39,10 +41,14 @@ class TrajectoryGenerator:
             builder: ASGBuilder with vocabulary for creating graphs
             interpreter: MiniLispInterpreter for test execution
             mask_token_id: Token ID for masking (typically vocabulary.mask_token_id)
+            scheduled_sampling_max: Maximum probability of using model predictions (0.95 = 95% model, 5% ground truth)
+            scheduled_sampling_warmup: Initial probability at iteration 0 (0.5 = 50% model, 50% ground truth)
         """
         self.builder = builder
         self.interpreter = interpreter
         self.mask_token_id = mask_token_id
+        self.scheduled_sampling_max = scheduled_sampling_max
+        self.scheduled_sampling_warmup = scheduled_sampling_warmup
 
     def generate_trajectory(
         self,
@@ -88,9 +94,17 @@ class TrajectoryGenerator:
                 tests_passing=False,  # Simplified for now
             ))
 
-            # Generate next state (either via model or random)
-            if model is not None and torch.rand(1).item() > epsilon:
-                # Use model prediction
+            # Generate next state using scheduled sampling
+            # Compute sampling probability: increases from warmup to max over iterations
+            use_model_prob = min(
+                self.scheduled_sampling_max,
+                self.scheduled_sampling_warmup + (iteration / max_iterations) * (1.0 - self.scheduled_sampling_warmup)
+            )
+
+            prev_graph = current_graph.clone()
+
+            if model is not None and torch.rand(1).item() < use_model_prob:
+                # Use model prediction (scheduled sampling)
                 with torch.no_grad():
                     # Update iteration and test signals in features
                     current_graph.x[:, 4] = iteration
@@ -99,24 +113,27 @@ class TrajectoryGenerator:
                     output = model.forward_full(current_graph, iteration=iteration)
                     predictions = output['logits'].argmax(dim=-1)
 
-                    # Update token IDs
-                    prev_graph = current_graph.clone()
+                    # Update token IDs with model predictions
                     current_graph.x[:, 1] = current_graph.x[:, 0]  # prev_token_id
                     current_graph.x[:, 0] = predictions.float()  # new token_id
             else:
-                # Random policy (for early training)
-                prev_graph = current_graph.clone()
-                num_nodes = current_graph.x.size(0)
+                # Use ground truth (for stability and exploration)
+                # Move toward clean graph incrementally
+                current_tokens = current_graph.x[:, 0].long()
+                target_tokens = clean_graph.x[:, 0].long()
 
-                # Randomly update some tokens
-                if self.builder.vocabulary:
-                    vocab_size = self.builder.vocabulary.vocab_size
-                    random_tokens = torch.randint(0, vocab_size, (num_nodes,))
+                # Identify incorrect nodes
+                incorrect_mask = (current_tokens != target_tokens)
 
-                    # Update with some probability
-                    update_mask = torch.rand(num_nodes) < 0.3
-                    current_graph.x[update_mask, 1] = current_graph.x[update_mask, 0]
-                    current_graph.x[update_mask, 0] = random_tokens[update_mask].float()
+                if incorrect_mask.any():
+                    # Fix a random subset of incorrect nodes (gradual improvement)
+                    incorrect_indices = incorrect_mask.nonzero(as_tuple=True)[0]
+                    num_to_fix = max(1, len(incorrect_indices) // 2)  # Fix half
+                    fix_indices = incorrect_indices[torch.randperm(len(incorrect_indices))[:num_to_fix]]
+
+                    # Update with ground truth
+                    current_graph.x[:, 1] = current_graph.x[:, 0]  # prev_token_id
+                    current_graph.x[fix_indices, 0] = target_tokens[fix_indices].float()
 
             # Check if we've converged (simplified)
             if torch.allclose(current_graph.x[:, 0], clean_graph.x[:, 0]):
@@ -255,6 +272,275 @@ class TrajectoryGenerator:
                 self.interpreter.trace_mode = False
 
         return test_signals
+
+
+@dataclass
+class GuidedTrajectoryStep:
+    """Single step in a guided refinement trajectory (with cross-attention)."""
+    input_graph: Data  # Current state [num_nodes, 5] - no test_signal feature
+    prev_graph: Data  # Previous iteration state
+    target_graph: Data  # Ground truth (clean program)
+    test_feedback: dict  # Test feedback for cross-attention
+    iteration: int  # Current iteration (0-indexed)
+    tests_passing: bool  # Whether all tests pass
+
+
+class GuidedTrajectoryGenerator:
+    """
+    Generates training trajectories with test feedback for cross-attention guidance.
+
+    This is the new approach that doesn't use test signals as node features,
+    but instead passes them as separate guidance for cross-attention.
+    """
+
+    def __init__(
+        self,
+        builder: ASGBuilder,
+        interpreter: MiniLispInterpreter,
+        mask_token_id: int = 0,
+        max_tests: int = 100,
+        max_nodes: int = 1000,
+        scheduled_sampling_max: float = 0.95,
+        scheduled_sampling_warmup: float = 0.5,
+    ):
+        """
+        Initialize guided trajectory generator.
+
+        Args:
+            builder: ASGBuilder with vocabulary
+            interpreter: MiniLispInterpreter for test execution
+            mask_token_id: Token ID for masking
+            max_tests: Maximum number of tests (for padding)
+            max_nodes: Maximum number of nodes (for trace encoding)
+            scheduled_sampling_max: Maximum prob of using model predictions
+            scheduled_sampling_warmup: Initial prob at iteration 0
+        """
+        self.builder = builder
+        self.interpreter = interpreter
+        self.mask_token_id = mask_token_id
+        self.max_tests = max_tests
+        self.max_nodes = max_nodes
+        self.scheduled_sampling_max = scheduled_sampling_max
+        self.scheduled_sampling_warmup = scheduled_sampling_warmup
+
+    def generate_trajectory(
+        self,
+        clean_graph: Data,
+        tests: List[TestCase],
+        corruption_rate: float = 0.5,
+        max_iterations: int = 5,
+        model: Optional[nn.Module] = None,
+    ) -> List[GuidedTrajectoryStep]:
+        """
+        Generate a training trajectory with test feedback for cross-attention.
+
+        Args:
+            clean_graph: Ground truth graph [num_nodes, 6]
+            tests: Test cases
+            corruption_rate: Fraction of nodes to corrupt
+            max_iterations: Maximum refinement iterations
+            model: Optional model for predictions (GuidedIterativeGraphUNet)
+
+        Returns:
+            List of guided trajectory steps
+        """
+        trajectory = []
+
+        # 1. Initial corruption (5 features: token, prev_token, depth, sibling, iteration)
+        current_graph = self._corrupt_graph(clean_graph, corruption_rate)
+        prev_graph = current_graph.clone()
+
+        # 2. Simulate refinement iterations
+        for iteration in range(max_iterations):
+            # Compute test feedback (format for cross-attention)
+            test_feedback = self._compute_test_feedback(current_graph, tests)
+
+            # Store trajectory step
+            trajectory.append(GuidedTrajectoryStep(
+                input_graph=current_graph.clone(),
+                prev_graph=prev_graph.clone(),
+                target_graph=clean_graph,
+                test_feedback=test_feedback,
+                iteration=iteration,
+                tests_passing=False,
+            ))
+
+            # Generate next state using scheduled sampling
+            use_model_prob = min(
+                self.scheduled_sampling_max,
+                self.scheduled_sampling_warmup + (iteration / max_iterations) * (1.0 - self.scheduled_sampling_warmup)
+            )
+
+            prev_graph = current_graph.clone()
+
+            if model is not None and torch.rand(1).item() < use_model_prob:
+                # Use model prediction
+                with torch.no_grad():
+                    # Update iteration feature
+                    current_graph.x[:, 4] = iteration
+
+                    # Move test feedback to same device as model
+                    device = next(model.parameters()).device
+                    test_feedback_device = {
+                        'test_ids': test_feedback['test_ids'].to(device),
+                        'test_statuses': test_feedback['test_statuses'].to(device),
+                        'test_traces': test_feedback['test_traces'].to(device),
+                    }
+
+                    output = model.forward_full(
+                        current_graph,
+                        iteration=iteration,
+                        test_feedback=test_feedback_device
+                    )
+                    predictions = output['logits'].argmax(dim=-1)
+
+                    # Update tokens
+                    current_graph.x[:, 1] = current_graph.x[:, 0]  # prev_token_id
+                    current_graph.x[:, 0] = predictions.float()  # new token_id
+            else:
+                # Use ground truth (gradual improvement)
+                current_tokens = current_graph.x[:, 0].long()
+                target_tokens = clean_graph.x[:, 0].long()
+
+                incorrect_mask = (current_tokens != target_tokens)
+
+                if incorrect_mask.any():
+                    incorrect_indices = incorrect_mask.nonzero(as_tuple=True)[0]
+                    num_to_fix = max(1, len(incorrect_indices) // 2)
+                    fix_indices = incorrect_indices[torch.randperm(len(incorrect_indices))[:num_to_fix]]
+
+                    current_graph.x[:, 1] = current_graph.x[:, 0]  # prev_token_id
+                    current_graph.x[fix_indices, 0] = target_tokens[fix_indices].float()
+
+            # Check convergence
+            if torch.allclose(current_graph.x[:, 0], clean_graph.x[:, 0]):
+                trajectory[-1] = GuidedTrajectoryStep(
+                    input_graph=trajectory[-1].input_graph,
+                    prev_graph=trajectory[-1].prev_graph,
+                    target_graph=clean_graph,
+                    test_feedback=test_feedback,
+                    iteration=iteration,
+                    tests_passing=True,
+                )
+                break
+
+        return trajectory
+
+    def _corrupt_graph(self, graph: Data, corruption_rate: float) -> Data:
+        """
+        Corrupt graph (5 features: token, prev_token, depth, sibling, iteration).
+
+        NOTE: No test_signal feature in this version!
+        """
+        # Extract only first 5 features (remove test_signal if present)
+        if graph.x.size(1) > 5:
+            x_clean = graph.x[:, :5].clone()
+        else:
+            x_clean = graph.x.clone()
+
+        corrupted = Data(
+            x=x_clean,
+            edge_index=graph.edge_index.clone(),
+            edge_attr=graph.edge_attr.clone() if hasattr(graph, 'edge_attr') else None,
+        )
+
+        if hasattr(graph, 'node_type'):
+            corrupted.node_type = graph.node_type.clone()
+
+        num_nodes = corrupted.x.size(0)
+
+        # Select nodes to corrupt
+        if corruption_rate >= 0.9:
+            corrupt_indices = list(range(num_nodes))
+        else:
+            num_corrupt = max(1, int(num_nodes * corruption_rate))
+            import random
+            corrupt_indices = random.sample(range(num_nodes), num_corrupt)
+
+        # Mask selected nodes
+        for idx in corrupt_indices:
+            corrupted.x[idx, 0] = self.mask_token_id  # token_id
+            corrupted.x[idx, 1] = self.mask_token_id  # prev_token_id
+
+        return corrupted
+
+    def _compute_test_feedback(
+        self,
+        graph: Data,
+        tests: List[TestCase],
+    ) -> dict:
+        """
+        Compute test feedback for cross-attention.
+
+        Returns dict with:
+            - 'test_ids': [num_tests] - Test identifiers (padded to max_tests)
+            - 'test_statuses': [num_tests, 1] - Pass/fail (0=pass, 1=fail)
+            - 'test_traces': [num_tests, max_nodes] - Execution trace masks
+        """
+        num_nodes = graph.x.size(0)
+        num_tests = len(tests)
+
+        # Initialize padded arrays
+        test_ids = torch.full((self.max_tests,), -1, dtype=torch.long)  # -1 = padding
+        test_statuses = torch.zeros(self.max_tests, 1)
+        test_traces = torch.zeros(self.max_tests, self.max_nodes)
+
+        # Try to reconstruct AST
+        try:
+            from src.data.asg_reconstructor import ASGReconstructor, ReconstructionError
+            reconstructor = ASGReconstructor(self.builder.vocabulary)
+            ast_root, graph_to_ast_map = reconstructor.reconstruct(graph)
+        except (ReconstructionError, Exception):
+            # Return empty feedback if reconstruction fails
+            return {
+                'test_ids': test_ids,
+                'test_statuses': test_statuses,
+                'test_traces': test_traces,
+            }
+
+        # Build reverse mapping
+        ast_to_graph_map = {v: k for k, v in graph_to_ast_map.items()}
+
+        # Execute each test
+        for test_idx, test in enumerate(tests[:self.max_tests]):
+            test_ids[test_idx] = test_idx
+
+            try:
+                # Run test
+                self.interpreter.trace_mode = False
+                test_results = self.interpreter.run_tests(ast_root, [test])
+
+                # Record status (0=pass, 1=fail)
+                test_passed = test_results[0]
+                test_statuses[test_idx, 0] = 0.0 if test_passed else 1.0
+
+                # If failed, trace execution
+                if not test_passed:
+                    self.interpreter.trace_mode = True
+                    self.interpreter.traced_nodes.clear()
+                    self.interpreter.node_id_map.clear()
+
+                    traced_ast_ids = self.interpreter.trace_execution(ast_root, test.inputs)
+
+                    # Map to graph indices and create trace mask
+                    for ast_id in traced_ast_ids:
+                        if ast_id in ast_to_graph_map:
+                            graph_idx = ast_to_graph_map[ast_id]
+                            if 0 <= graph_idx < min(num_nodes, self.max_nodes):
+                                test_traces[test_idx, graph_idx] = 1.0
+
+            except Exception:
+                # Test execution failed - mark as failing
+                test_statuses[test_idx, 0] = 1.0
+                continue
+            finally:
+                self.interpreter.trace_mode = False
+
+        return {
+            'test_ids': test_ids,
+            'test_statuses': test_statuses,
+            'test_traces': test_traces,
+        }
 
 
 def corrupt_program_curriculum(
