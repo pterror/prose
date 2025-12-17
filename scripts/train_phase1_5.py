@@ -368,6 +368,7 @@ def main():
         stability_weight=0.1,
         correction_weight=0.5,
         confidence_weight=0.2,
+        test_following_weight=0.3,  # Phase 1: encourage following test signals
     )
 
     # Create optimizer

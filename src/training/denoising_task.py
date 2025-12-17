@@ -109,6 +109,7 @@ class IterativeRefinementLoss(nn.Module):
         stability_weight: float = 0.1,
         correction_weight: float = 0.5,
         confidence_weight: float = 0.2,
+        test_following_weight: float = 0.3,
     ):
         """
         Initialize multi-objective loss.
@@ -119,6 +120,7 @@ class IterativeRefinementLoss(nn.Module):
             stability_weight: Weight for stability loss (don't change correct)
             correction_weight: Weight for correction loss (fix incorrect)
             confidence_weight: Weight for confidence calibration
+            test_following_weight: Weight for test-following loss (change failing nodes)
         """
         super().__init__()
         self.vocab_size = vocab_size
@@ -126,6 +128,7 @@ class IterativeRefinementLoss(nn.Module):
         self.stability_weight = stability_weight
         self.correction_weight = correction_weight
         self.confidence_weight = confidence_weight
+        self.test_following_weight = test_following_weight
 
     def forward(
         self,
@@ -185,12 +188,24 @@ class IterativeRefinementLoss(nn.Module):
             confidence_targets
         )
 
+        # 6. Test-following loss: encourage changes on nodes with failing tests
+        # Extract test signals (feature 5)
+        test_signals = current_graph.x[:, 5] if current_graph.x.size(1) > 5 else torch.zeros_like(current_tokens).float()
+
+        # Penalize predicting same token on nodes marked by test failures
+        predicted_tokens = logits.argmax(dim=-1)
+        unchanged_mask = (predicted_tokens == current_tokens)
+
+        # Loss: higher when we keep same token on failing test nodes
+        test_following_loss = (test_signals * unchanged_mask.float()).mean()
+
         # Total weighted loss
         total_loss = (
             self.reconstruction_weight * recon_loss +
             self.stability_weight * stability_loss +
             self.correction_weight * correction_loss +
-            self.confidence_weight * confidence_loss
+            self.confidence_weight * confidence_loss +
+            self.test_following_weight * test_following_loss
         )
 
         # Metrics
@@ -214,12 +229,14 @@ class IterativeRefinementLoss(nn.Module):
             'stability_loss': stability_loss.item() if isinstance(stability_loss, torch.Tensor) else 0.0,
             'correction_loss': correction_loss.item() if isinstance(correction_loss, torch.Tensor) else 0.0,
             'confidence_loss': confidence_loss.item(),
+            'test_following_loss': test_following_loss.item(),
             'accuracy': accuracy.item(),
             'correct_accuracy': correct_accuracy.item(),
             'incorrect_accuracy': incorrect_accuracy.item(),
             'mean_confidence': confidence.mean().item(),
             'num_correct': correct_mask.sum().item(),
             'num_incorrect': incorrect_mask.sum().item(),
+            'test_signals_active': (test_signals > 0).sum().item(),
         }
 
         return total_loss, metrics
