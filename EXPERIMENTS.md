@@ -271,3 +271,118 @@ At low corruption, the model's one-shot prediction is already quite good (63.3%)
 **Status:** One-shot fixed but iterative refinement fails. Need different approach for effective refinement.
 
 ---
+
+## Experiment 3d: Scaled Dataset (1000 samples, 47.5% duplication)
+**Date:** 2025-12-17
+**Hypothesis:** Scaling training data from 80 to 1000 samples will help the model learn to use cross-attention effectively for iterative refinement.
+
+**Configuration:**
+- Training samples: 1000 (vs 80 in previous experiments)
+- Validation samples: 200 (vs 10 in previous experiments)
+- Same architecture and corrected training as Experiment 3c
+- Dataset quality: 47.5% duplication rate (525 unique graphs)
+
+**Results:**
+- **Best validation accuracy**: 67.3% (+5.7% vs Experiment 3c)
+- **One-shot @ 20%**: 82.2% (+18.9% vs Experiment 3c!) 🎉
+- **One-shot @ 50%**: 64.8% (+9.5% vs Experiment 3c!)
+- **One-shot @ 75%**: 51.3%
+
+**Iterative Refinement Results:**
+
+| Corruption | One-shot | Final | Improvement |
+|------------|----------|-------|-------------|
+| 20%        | 82.2%    | 69.8% | **-12.4%** ❌ |
+| 50%        | 64.8%    | 59.6% | **-5.2%** ❌ |
+| 75%        | 51.3%    | 52.6% | **+1.2%** ⚠️ |
+
+**Full Comparison Table:**
+
+| Experiment | Data Size | One-shot @ 20% | Iterative @ 20% | One-shot @ 50% | Iterative @ 50% |
+|------------|-----------|----------------|-----------------|----------------|-----------------|
+| Exp 1 | 80 | 73.4% | +1.9% | 57.7% | +1.9% |
+| Exp 3c | 80 | 63.3% | -6.2% | 55.3% | -3.7% |
+| **Exp 3d** | 1000 | **82.2%** ✅ | **-12.4%** ❌ | **64.8%** ✅ | **-5.2%** ❌ |
+
+**Key Findings:**
+
+1. ✅ **One-shot BREAKTHROUGH**: 82.2% exceeds Experiment 1's baseline (73.4%)!
+   - Scaling data by 12.5x improved one-shot by +18.9%
+   - Proves cross-attention architecture CAN learn strong one-shot without test signals
+
+2. ❌ **Iterative refinement got WORSE**: -12.4% vs -6.2% with less data
+   - More data made the problem worse, not better
+   - Model learned such strong one-shot that cross-attention interferes MORE
+
+3. ⚠️ **Dataset quality concern**: 47.5% duplication rate
+   - Only 525 unique graphs out of 1000 samples
+   - High overfitting risk, yet model still improved
+   - True performance may be higher with more diverse data
+
+**Root Cause Analysis:**
+
+The cross-attention architecture has a **fundamental tradeoff**:
+- **Strong one-shot**: Model learns excellent predictions without test feedback
+- **Interfering refinement**: Cross-attention confuses the model during iterations 1+
+
+With more data:
+- One-shot gets much stronger (82.2%)
+- But this makes test feedback even more disruptive
+- Model "trusts" its one-shot prediction and ignores/misuses test signals
+
+**Comparison with Scalability Requirements:**
+
+Cross-attention **DOES solve scalability** (handles 1000+ tests efficiently), but **DOESN'T solve iterative refinement**. The architecture can scale but can't improve predictions.
+
+**Conclusions:**
+- ❌ **Cross-attention approach failed**: Cannot achieve both strong one-shot AND effective iterative refinement
+- ✅ **One-shot capability proven**: 82.2% shows the 5-feature architecture CAN work
+- 🔄 **Need new approach**: Return to Experiment 1 architecture (test_signal as feature) or explore hybrid
+
+**Status:** Cross-attention architecture fundamentally incompatible with iterative refinement for this task. Recommend returning to Experiment 1 approach.
+
+---
+
+## Summary & Conclusions
+
+After 4 experiments (1, 3, 3b, 3c, 3d), we can draw clear conclusions:
+
+### What Works ✅
+1. **Test signal as node feature (Exp 1)**: 73.4% one-shot, +1.9% iterative
+2. **Scaled data with cross-attention (Exp 3d)**: 82.2% one-shot (best so far!)
+3. **Corrected training (Exp 3c/3d)**: Successfully prevents test feedback dependency at iteration 0
+
+### What Doesn't Work ❌
+1. **Cross-attention for iterative refinement**: Consistently hurts performance (-12.4% at 20% corruption)
+2. **Feature reduction (6→5)**: Costs ~10% accuracy when starting from scratch
+3. **Small dataset (80 samples)**: Insufficient for learning robust patterns
+
+### The Fundamental Problem
+Cross-attention has a **tradeoff**:
+- Strong one-shot requires learning without test feedback
+- Effective refinement requires using test feedback
+- Training for strong one-shot makes test feedback disruptive
+
+### Scalability vs Performance
+- **Cross-attention**: Scales to 1000+ tests BUT doesn't improve predictions
+- **Test signal feature (Exp 1)**: Good performance BUT doesn't scale (aggregation problem)
+
+### Recommended Next Steps
+
+**Option 1: Return to Experiment 1 + Real Test Execution** (Most Promising)
+- Keep test_signal as 6th feature (proven 73.4% one-shot)
+- Implement real test execution per plan file
+- Explore better aggregation for multiple test failures
+- Accept scalability limitations for now, focus on correctness
+
+**Option 2: Hybrid Architecture**
+- Use test_signal feature for iterations 0-1 (strong base prediction)
+- Use cross-attention only at iteration 2+ when ready to refine
+- May get best of both worlds
+
+**Option 3: Rethink Training Objective**
+- Current: Predict correct tokens
+- Alternative: Predict token CHANGES based on test feedback
+- May help model learn to use feedback constructively
+
+---
