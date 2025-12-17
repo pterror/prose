@@ -155,8 +155,19 @@ class IterativeRefinementLoss(nn.Module):
         current_tokens = current_graph.x[:, 0].long()
         target_tokens = target_graph.x[:, 0].long()
 
-        # 1. Reconstruction loss (standard cross-entropy)
-        recon_loss = F.cross_entropy(logits, target_tokens)
+        # Extract test signals (feature 5) - used for Phase 2 weighting
+        test_signals = current_graph.x[:, 5] if current_graph.x.size(1) > 5 else torch.zeros_like(current_tokens).float()
+
+        # 1. Reconstruction loss with test-guided weighting (Phase 2)
+        # Compute per-node losses
+        per_node_recon_loss = F.cross_entropy(logits, target_tokens, reduction='none')
+
+        # Weight nodes with test failures higher (10x) to focus learning
+        # test_weight_map: 1.0 for normal nodes, 10.0 for nodes on failing test paths
+        test_weight_map = 1.0 + test_signals * 9.0
+
+        # Apply weighted reconstruction loss
+        recon_loss = (per_node_recon_loss * test_weight_map).mean()
 
         # 2. Identify correct vs incorrect nodes
         correct_mask = (current_tokens == target_tokens)
@@ -189,8 +200,7 @@ class IterativeRefinementLoss(nn.Module):
         )
 
         # 6. Test-following loss: encourage changes on nodes with failing tests
-        # Extract test signals (feature 5)
-        test_signals = current_graph.x[:, 5] if current_graph.x.size(1) > 5 else torch.zeros_like(current_tokens).float()
+        # (test_signals already extracted above for Phase 2)
 
         # Penalize predicting same token on nodes marked by test failures
         predicted_tokens = logits.argmax(dim=-1)
@@ -237,6 +247,7 @@ class IterativeRefinementLoss(nn.Module):
             'num_correct': correct_mask.sum().item(),
             'num_incorrect': incorrect_mask.sum().item(),
             'test_signals_active': (test_signals > 0).sum().item(),
+            'mean_test_weight': test_weight_map.mean().item(),  # Phase 2 metric
         }
 
         return total_loss, metrics
