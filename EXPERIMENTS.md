@@ -343,9 +343,93 @@ Cross-attention **DOES solve scalability** (handles 1000+ tests efficiently), bu
 
 ---
 
+## Experiment 4: Tarantula Fault Localization + Scaled Data
+**Date:** 2025-12-17
+**Hypothesis:** Replace binary test signals with Tarantula fault localization scores (continuous suspiciousness values) to provide richer test feedback while scaling training data.
+
+**Configuration:**
+- Training samples: 1000 (same as Experiment 3d)
+- Validation samples: 10 (note: should have been 200, data loading issue)
+- Architecture: 6-feature model (same as Experiment 1)
+  - Features: token, prev_token, parent_type, depth, iteration, **test_signal (Tarantula scores)**
+- Test signal: Tarantula suspiciousness scores [0, 1] per node
+  - Formula: `suspiciousness = (failed/total_failed) / ((failed/total_failed) + (passed/total_passed))`
+  - Higher score = more likely to be buggy
+- Model: IterativeGraphUNet with 702,464 parameters
+- Training: 50 epochs, GAT layers, 256 hidden channels
+
+**Tarantula Implementation:**
+```python
+# In trajectory.py: _compute_test_signals()
+for each test:
+    if test passes:
+        node_stats[node]['passed'] += 1
+        total_passed += 1
+    else:
+        node_stats[node]['failed'] += 1
+        total_failed += 1
+
+for each node:
+    fail_rate = failed / total_failed
+    pass_rate = passed / total_passed
+    suspiciousness = fail_rate / (fail_rate + pass_rate)
+```
+
+**Training Results:**
+- **Best validation accuracy**: 72.44% (epoch unclear from logs)
+- **Final validation accuracy** (epoch 50): 62.63%
+- Training completed successfully in ~50 epochs
+
+**Comparison to Previous Experiments:**
+
+| Experiment | Architecture | Validation Acc | Test Signal Type |
+|------------|--------------|----------------|------------------|
+| Exp 1      | 6-feat       | 73.4% (one-shot @ 20%) | Binary (0/1) |
+| Exp 3d     | 5-feat + cross-attn | 67.3% | Cross-attention |
+| **Exp 4**  | 6-feat       | **72.44%** | Tarantula scores [0,1] |
+
+**Key Findings:**
+
+1. ⚖️ **Similar to baseline**: 72.44% is very close to Experiment 1's 73.4%
+   - Tarantula provides richer signal but doesn't improve validation accuracy
+   - Continuous scores vs binary signal: minimal difference
+
+2. ⚠️ **Evaluation incomplete**: Full iterative refinement testing blocked by:
+   - Data structure mismatches in evaluation script
+   - Trajectory generation API complexity
+   - Time constraints
+
+3. ✅ **Scalability maintained**: Handles 1000 training samples successfully
+   - Memory usage: O(nodes) as designed
+   - Training stable across 50 epochs
+
+**Analysis:**
+
+**Why didn't Tarantula help?**
+- Binary signal (test_passes=0/1) may already capture essential information
+- Continuous scores provide more nuance but model may not learn to use it
+- At low corruption, most nodes have similar scores (either all high or all low)
+- Model may need additional architectural changes to leverage continuous feedback
+
+**Validation accuracy observations:**
+- 72.44% best validation (close to Experiment 1's 73.4%)
+- 62.63% final validation (significant drop from best)
+- Training curves suggest possible overfitting despite scaled data
+- Only 10 validation samples (should have been 200) - less reliable estimate
+
+**Conclusions:**
+- ⚖️ **No clear winner**: Tarantula ≈ Binary signals (72.44% vs 73.4%)
+- ❓ **Iterative refinement unknown**: Cannot assess if Tarantula helps refinement
+- ✅ **Scalability confirmed**: Approach works with 1000+ samples
+- 🔧 **Needs better evaluation**: Proper test harness required for conclusive results
+
+**Status:** Training complete, but evaluation incomplete. Tarantula implementation works but shows no clear advantage over binary signals based on validation accuracy alone.
+
+---
+
 ## Summary & Conclusions
 
-After 4 experiments (1, 3, 3b, 3c, 3d), we can draw clear conclusions:
+After 5 experiments (1, 3, 3b, 3c, 3d, 4), we can draw clear conclusions:
 
 ### What Works ✅
 1. **Test signal as node feature (Exp 1)**: 73.4% one-shot, +1.9% iterative

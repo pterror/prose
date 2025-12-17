@@ -216,17 +216,26 @@ class TrajectoryGenerator:
         tests: List[TestCase],
     ) -> torch.Tensor:
         """
-        Execute tests on reconstructed program and compute failure signals.
+        Execute tests and compute Tarantula fault localization scores.
+
+        Uses the Tarantula formula to compute suspiciousness scores for each node
+        based on how many failing vs passing tests execute that node.
 
         Args:
             graph: Current program graph
             tests: Test cases to execute
 
         Returns:
-            Tensor [num_nodes] with 1.0 for nodes on failing test execution paths
+            Tensor [num_nodes] with suspiciousness scores in [0, 1]
+            Higher scores = more suspicious (likely buggy)
         """
         num_nodes = graph.x.size(0)
-        test_signals = torch.zeros(num_nodes)
+
+        # Track execution statistics per node
+        from collections import defaultdict
+        node_stats = defaultdict(lambda: {'failed': 0, 'passed': 0})
+        total_failed = 0
+        total_passed = 0
 
         # Try to reconstruct AST from graph
         try:
@@ -236,33 +245,43 @@ class TrajectoryGenerator:
             ast_root, graph_to_ast_map = reconstructor.reconstruct(graph)
         except (ReconstructionError, Exception) as e:
             # Graph too corrupted to reconstruct - return zeros
-            return test_signals
+            return torch.zeros(num_nodes)
 
         # Build reverse mapping: AST object ID → graph index
         ast_to_graph_map = {v: k for k, v in graph_to_ast_map.items()}
 
-        # Execute each test
+        # Execute all tests and collect statistics
         for test in tests:
             try:
                 # Run test
-                self.interpreter.trace_mode = False  # Disable tracing for test execution
+                self.interpreter.trace_mode = False
                 test_results = self.interpreter.run_tests(ast_root, [test])
+                test_passed = test_results[0]
 
-                # If test fails, trace which nodes were executed
-                if not test_results[0]:
-                    # Re-run with tracing to get execution path
-                    self.interpreter.trace_mode = True
-                    self.interpreter.traced_nodes.clear()
-                    self.interpreter.node_id_map.clear()
+                # Trace which nodes were executed
+                self.interpreter.trace_mode = True
+                self.interpreter.traced_nodes.clear()
+                self.interpreter.node_id_map.clear()
 
-                    traced_ast_ids = self.interpreter.trace_execution(ast_root, test.inputs)
+                traced_ast_ids = self.interpreter.trace_execution(ast_root, test.inputs)
 
-                    # Map AST object IDs back to graph indices
-                    for ast_id in traced_ast_ids:
-                        if ast_id in ast_to_graph_map:
-                            graph_idx = ast_to_graph_map[ast_id]
-                            if 0 <= graph_idx < num_nodes:
-                                test_signals[graph_idx] = 1.0
+                # Map AST object IDs back to graph indices
+                traced_graph_indices = []
+                for ast_id in traced_ast_ids:
+                    if ast_id in ast_to_graph_map:
+                        graph_idx = ast_to_graph_map[ast_id]
+                        if 0 <= graph_idx < num_nodes:
+                            traced_graph_indices.append(graph_idx)
+
+                # Update statistics
+                if test_passed:
+                    total_passed += 1
+                    for graph_idx in traced_graph_indices:
+                        node_stats[graph_idx]['passed'] += 1
+                else:
+                    total_failed += 1
+                    for graph_idx in traced_graph_indices:
+                        node_stats[graph_idx]['failed'] += 1
 
             except Exception:
                 # Test execution failed - skip this test
@@ -270,6 +289,28 @@ class TrajectoryGenerator:
             finally:
                 # Reset trace mode
                 self.interpreter.trace_mode = False
+
+        # Compute Tarantula suspiciousness scores
+        test_signals = torch.zeros(num_nodes)
+
+        if total_failed > 0:
+            for graph_idx, stats in node_stats.items():
+                failed = stats['failed']
+                passed = stats['passed']
+
+                # Tarantula formula:
+                # suspiciousness = (failed/total_failed) / ((failed/total_failed) + (passed/total_passed))
+                fail_rate = failed / total_failed
+                pass_rate = passed / total_passed if total_passed > 0 else 0.0
+
+                # Avoid division by zero
+                denominator = fail_rate + pass_rate
+                if denominator > 0:
+                    suspiciousness = fail_rate / denominator
+                else:
+                    suspiciousness = 0.0
+
+                test_signals[graph_idx] = suspiciousness
 
         return test_signals
 
